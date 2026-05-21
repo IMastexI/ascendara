@@ -229,32 +229,38 @@ class ImageCacheService {
       }
     }
 
-    // If already being loaded, return the existing promise (deduplication)
     if (this.activeRequests.has(imgID)) {
       return this.activeRequests.get(imgID);
     }
 
+    const loadPromise = this._resolveImage(imgID, options);
+    this.activeRequests.set(imgID, loadPromise);
+
+    try {
+      const result = await loadPromise;
+      if (result) this._setMemoryCache(imgID, result);
+      return result;
+    } finally {
+      this.activeRequests.delete(imgID);
+    }
+  }
+
+  /**
+   * Internal method that performs the actual image resolution after deduplication.
+   */
+  async _resolveImage(imgID, options = { priority: "normal", quality: "high" }) {
     // Get settings to determine if local index
     const settings = await this._getSettings();
-    // App now uses the local index exclusively. Treat any configured localIndex
-    // path as local-mode — the deprecated `usingLocalIndex` flag would otherwise
-    // force every image through the API and trigger 429s.
     const isLocalIndex = !!settings?.localIndex;
 
     // For local index - load directly from disk (no IndexedDB wait needed)
     // When using local index, NEVER fall back to API
     if (isLocalIndex) {
-      const loadPromise = this._loadLocalImage(imgID, settings.localIndex);
-      this.activeRequests.set(imgID, loadPromise);
-
       try {
-        const result = await loadPromise;
-        return result; // Return result even if null - don't fall back to API
+        return await this._loadLocalImage(imgID, settings.localIndex);
       } catch (error) {
         console.warn(`[ImageCache] Failed to load local image ${imgID}:`, error);
-        return null; // Return null instead of falling through to API
-      } finally {
-        this.activeRequests.delete(imgID);
+        return null;
       }
     }
 
@@ -276,20 +282,11 @@ class ImageCacheService {
     }
 
     // Load from API (only when NOT using local index)
-    const loadPromise = this._loadFromAPI(imgID, settings, options);
-    this.activeRequests.set(imgID, loadPromise);
-
     try {
-      const result = await loadPromise;
-      // Only cache non-null results. Caching null for rate-limited requests
-      // would make those images permanently empty even after the cooldown.
-      if (result) this._setMemoryCache(imgID, result);
+      const result = await this._loadFromAPI(imgID, settings, options);
       return result;
     } catch (error) {
-      this.activeRequests.delete(imgID);
       throw error;
-    } finally {
-      this.activeRequests.delete(imgID);
     }
   }
 

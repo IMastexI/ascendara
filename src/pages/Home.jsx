@@ -44,6 +44,7 @@ import {
   MessageSquare,
   HelpCircle,
 } from "lucide-react";
+import { useImageLoader } from "@/hooks/useImageLoader";
 import gameService from "@/services/gameService";
 import imageCacheService from "@/services/imageCacheService";
 import steamGridImageService from "@/services/steamGridImageService";
@@ -113,47 +114,31 @@ GameCoverFallback.displayName = "GameCoverFallback";
 
 // Compact Game Card for horizontal scrolling sections
 const CompactGameCard = memo(({ game, onClick, onContextMenu }) => {
-  // Synchronous SteamGrid peek for instant render on custom-source games
-  const initialSgdbUrl = (() => {
-    if (game?.imgID || !game?.game) return null;
-    const peeked = steamGridImageService.peek(game.game);
-    return peeked ? steamGridImageService.pickUrl(peeked, "card") : null;
-  })();
-  const [imageUrl, setImageUrl] = useState(initialSgdbUrl);
-  const [resolved, setResolved] = useState(!!initialSgdbUrl);
-  const { t } = useLanguage();
-  const imageLoadedRef = useRef(!!initialSgdbUrl);
+  const cardRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    if (imageLoadedRef.current) return;
-    const loadImage = async () => {
-      try {
-        if (game?.imgID) {
-          const url = await imageCacheService.getImage(game.imgID);
-          if (url) {
-            imageLoadedRef.current = true;
-            setImageUrl(url);
-          }
-          return;
-        }
-        // Custom sources: resolve a cover by game name via SteamGridDB
-        if (game?.game) {
-          const assets = await steamGridImageService.getAssets(game.game);
-          const url = steamGridImageService.pickUrl(assets, "card");
-          if (url) {
-            imageLoadedRef.current = true;
-            setImageUrl(url);
-          }
-        }
-      } finally {
-        setResolved(true);
-      }
-    };
-    loadImage();
-  }, [game?.imgID, game?.game]);
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setIsVisible(true); },
+      { rootMargin: "200px", threshold: 0.1 }
+    );
+    if (cardRef.current) observer.observe(cardRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const { cachedImage: imageUrl, loading } = useImageLoader(game?.imgID, {
+    quality: isVisible ? "high" : "low",
+    priority: isVisible ? "high" : "low",
+    enabled: !!game?.imgID || (!game?.imgID && !!game?.game),
+    fallbackGameName: !game?.imgID ? game?.game : null,
+    fallbackSlot: "card",
+  });
+
+  const resolved = !loading;
 
   return (
     <div
+      ref={cardRef}
       className="group relative flex-shrink-0 cursor-pointer"
       style={{ width: "280px" }}
       onClick={onClick}
@@ -205,44 +190,31 @@ const CompactGameCard = memo(({ game, onClick, onContextMenu }) => {
 
 // Mini Game Card for category grids
 const MiniGameCard = memo(({ game, onClick, onContextMenu }) => {
-  const initialSgdbUrl = (() => {
-    if (game?.imgID || !game?.game) return null;
-    const peeked = steamGridImageService.peek(game.game);
-    return peeked ? steamGridImageService.pickUrl(peeked, "card") : null;
-  })();
-  const [imageUrl, setImageUrl] = useState(initialSgdbUrl);
-  const [resolved, setResolved] = useState(!!initialSgdbUrl);
-  const imageLoadedRef = useRef(!!initialSgdbUrl);
+  const cardRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    if (imageLoadedRef.current) return;
-    const loadImage = async () => {
-      try {
-        if (game?.imgID) {
-          const url = await imageCacheService.getImage(game.imgID);
-          if (url) {
-            imageLoadedRef.current = true;
-            setImageUrl(url);
-          }
-          return;
-        }
-        if (game?.game) {
-          const assets = await steamGridImageService.getAssets(game.game);
-          const url = steamGridImageService.pickUrl(assets, "card");
-          if (url) {
-            imageLoadedRef.current = true;
-            setImageUrl(url);
-          }
-        }
-      } finally {
-        setResolved(true);
-      }
-    };
-    loadImage();
-  }, [game?.imgID, game?.game]);
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setIsVisible(true); },
+      { rootMargin: "200px", threshold: 0.1 }
+    );
+    if (cardRef.current) observer.observe(cardRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const { cachedImage: imageUrl, loading } = useImageLoader(game?.imgID, {
+    quality: isVisible ? "high" : "low",
+    priority: isVisible ? "high" : "low",
+    enabled: !!game?.imgID || (!game?.imgID && !!game?.game),
+    fallbackGameName: !game?.imgID ? game?.game : null,
+    fallbackSlot: "card",
+  });
+
+  const resolved = !loading;
 
   return (
     <div
+      ref={cardRef}
       className="group/mini relative cursor-pointer overflow-hidden rounded-lg"
       onClick={onClick}
       onContextMenu={(e) => {
