@@ -853,10 +853,9 @@ export default function DownloadPage() {
         directUrl = directUrl.replace(/^(?:https?:)?\/\//, "https://");
       }
     }
-    // Handle seamless providers (gofile, buzzheavier, pixeldrain) when not using Torbox
+    // Handle seamless providers (gofile, pixeldrain) when not using Torbox
     else if (
       (selectedProvider === "gofile" ||
-        selectedProvider === "buzzheavier" ||
         selectedProvider === "pixeldrain") &&
       !shouldUseTorbox()
     ) {
@@ -2718,9 +2717,7 @@ export default function DownloadPage() {
                               displayName = "MegaDB";
                               break;
                             case "buzzheavier":
-                              displayName = !settings.prioritizeTorboxOverSeamless
-                                ? "Seamless (BuzzHeavier)"
-                                : "BuzzHeavier";
+                              displayName = "BuzzHeavier";
                               break;
                             case "pixeldrain":
                               displayName = !settings.prioritizeTorboxOverSeamless
@@ -2837,7 +2834,7 @@ export default function DownloadPage() {
                                   displayName = "MegaDB";
                                   break;
                                 case "buzzheavier":
-                                  displayName = "Seamless (BuzzHeavier)";
+                                  displayName = "BuzzHeavier";
                                   break;
                                 case "pixeldrain":
                                   displayName = "Seamless (PixelDrain)";

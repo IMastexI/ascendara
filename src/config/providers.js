@@ -7,14 +7,14 @@
  */
 
 // Providers that support seamless (in-app) downloads.
-export const SEAMLESS_PROVIDERS = ["gofile", "buzzheavier", "pixeldrain"];
+export const SEAMLESS_PROVIDERS = ["gofile", "pixeldrain"];
 
 // Providers that route through the TorBox debrid service.
 export const TORBOX_PROVIDERS = ["1fichier", "datanodes", "qiwi", "megadb"];
 
 // Providers that are TorBox-eligible in addition to seamless hosts
 // (used when prioritizeTorboxOverSeamless is toggled).
-export const TORBOX_ELIGIBLE_SEAMLESS = ["gofile", "buzzheavier", "datanodes", "pixeldrain"];
+export const TORBOX_ELIGIBLE_SEAMLESS = ["gofile", "datanodes", "pixeldrain"];
 
 // Providers whose downloads are considered "verified" / trusted.
 export const VERIFIED_PROVIDERS = ["megadb", "gofile", "buzzheavier", "pixeldrain"];
@@ -51,6 +51,8 @@ export const PROVIDER_DOMAINS = {
     "buzzheavier.com",
     "bzzhr.co",
     "bzzhr.to",
+    "ts.bzzhr.to",
+    "fafda.to",
     "fuckingfast.net",
     "fuckingfast.co",
   ],

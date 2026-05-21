@@ -617,6 +617,8 @@ class RobustDownloader:
         'buzzheavier.com',
         'bzzhr.co',
         'bzzhr.to',
+        'ts.bzzhr.to',
+        'fafda.to',
         'fuckingfast.net',
         'fuckingfast.co'
     ]
@@ -959,64 +961,88 @@ class RobustDownloader:
     
     def _download_buzzheavier(self, url: str):
         """Download from Buzzheavier with robust chunked download and resume support."""
-        from bs4 import BeautifulSoup
-        
+        from urllib.parse import urlparse, parse_qs
         import re
 
         logging.info(f"[RobustDownloader] Buzzheavier download: {url}")
-        
-        # Get the actual download URL from Buzzheavier
-        session = create_robust_session()
-        response = session.get(url)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # The title contains real file name
-        title = soup.title.string.strip() if soup.title else 'buzzheavier_download'
-        logging.info(f"[Buzzheavier] Title/filename: {title}")
 
-        # Extract signed token from html
-        token_match = re.search(r'hx-get="[^"]+/download\?t=([^"&]+)', response.text)
-        if not token_match:
-            raise Exception("Could not find download token in page. Buzzheavier may have changed their API.")
-        
-        token = token_match.group(1)
-        logging.info(f"[Buzzheavier] Found token: {token[:20]}...")
-        
-        # Build URL with token
-        base_domain = url.split('/')[2]  # buzzheavier.com or bzzhr.to
-        file_id = url.rstrip('/').split('/')[-1]
-        download_url_with_token = f"https://{base_domain}/{file_id}/download?t={token}"
+        parsed = urlparse(url)
+        path_parts = parsed.path.strip('/').split('/')
+        is_presigned = len(path_parts) >= 2 and path_parts[0] == 'd' and parsed.query
 
-        headers = {
-            'hx-current-url': url,
-            'hx-request': 'true',
-            'referer': url
-        }
-
-        head_response = session.head(download_url_with_token, headers=headers, allow_redirects=False)
-        hx_redirect = head_response.headers.get('hx-redirect') or head_response.headers.get('Hx-Redirect')
-
-        if not hx_redirect:
-            raise Exception(f"No hx-redirect in response. Status: {head_response.status_code}")
-
-        # Verify that it is not a self-redirect loop
-        if hx_redirect.rstrip('/') == url.rstrip('/'):
-            raise Exception(f"Buzzheavier returned self-redirect loop: {hx_redirect}")
-
-        logging.info(f"[Buzzheavier] Final download URL: {hx_redirect}")
-
-        # Build the absolute URL if relative
-        if hx_redirect.startswith('/'):
-            final_url = f"https://{base_domain}{hx_redirect}"
+        if is_presigned:
+            # New format: https://ts.bzzhr.to/d/{file_id}?v={token} - direct download URL
+            logging.info(f"[Buzzheavier] Detected pre-signed URL, downloading directly")
+            final_url = url
+            # Try to get filename from Content-Disposition header
+            session = create_robust_session()
+            try:
+                head = session.head(url, allow_redirects=True, timeout=20)
+                cd = head.headers.get('content-disposition', '')
+                fname_match = re.findall(r'filename[*]?=["\']?([^"\';\r\n]+)', cd, re.IGNORECASE)
+                filename = sanitize_folder_name(fname_match[0].strip()) if fname_match else path_parts[1]
+            except Exception as e:
+                logging.warning(f"[Buzzheavier] Could not get filename from headers: {e}")
+                filename = path_parts[1]
+            finally:
+                session.close()
+            logging.info(f"[Buzzheavier] Filename: {filename}")
         else:
-            final_url = hx_redirect
+            # Legacy format: https://bzzhr.to/{file_id} - scrape page for token
+            from bs4 import BeautifulSoup
+            session = create_robust_session()
+            page_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            response = session.get(url, headers=page_headers)
+            response.raise_for_status()
 
-        session.close()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            title = soup.title.string.strip() if soup.title else 'buzzheavier_download'
+            logging.info(f"[Buzzheavier] Title/filename: {title}")
 
-        # Use the title as the file name (it already contains the extension)
-        filename = sanitize_folder_name(title) if title else file_id
+            token_match = re.search(r'hx-get="[^"]+/download\?t=([^"&]+)', response.text)
+            if not token_match:
+                raise Exception("Could not find download token in page. Buzzheavier may have changed their API.")
+
+            token = token_match.group(1)
+            logging.info(f"[Buzzheavier] Found token: {token[:20]}...")
+
+            base_domain = parsed.netloc
+            file_id = url.rstrip('/').split('/')[-1]
+            download_url_with_token = f"https://{base_domain}/{file_id}/download?t={token}"
+
+            hx_headers = {
+                'hx-current-url': url,
+                'hx-request': 'true',
+                'referer': url
+            }
+            head_response = session.head(download_url_with_token, headers=hx_headers, allow_redirects=False)
+            hx_redirect = head_response.headers.get('hx-redirect') or head_response.headers.get('Hx-Redirect')
+
+            if not hx_redirect:
+                raise Exception(f"No hx-redirect in response. Status: {head_response.status_code}")
+
+            if hx_redirect.rstrip('/') == url.rstrip('/'):
+                raise Exception(f"Buzzheavier returned self-redirect loop: {hx_redirect}")
+
+            logging.info(f"[Buzzheavier] Final download URL: {hx_redirect}")
+
+            if hx_redirect.startswith('/'):
+                final_url = f"https://{base_domain}{hx_redirect}"
+            else:
+                final_url = hx_redirect
+
+            session.close()
+            filename = sanitize_folder_name(title) if title else file_id
         # Use the robust ChunkedDownloader for the actual file download
         dest_path = os.path.join(self.download_dir, filename)
         
