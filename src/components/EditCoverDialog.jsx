@@ -131,10 +131,8 @@ const EditCoverDialog = ({ open, onOpenChange, gameName, onImageUpdate }) => {
         reader.onloadend = async () => {
           const dataUrl = reader.result;
           try {
-            // 3. Update localStorage with new image
-            localStorage.setItem(localStorageKey, dataUrl);
-
-            // 4. Update the image on disk via Electron IPC
+            // 3. Update the image on disk via Electron IPC (no localStorage
+            // caching - quota issues with base64 data URLs)
             if (window.electron && window.electron.updateGameCover) {
               await window.electron.updateGameCover(
                 gameName,
@@ -144,7 +142,7 @@ const EditCoverDialog = ({ open, onOpenChange, gameName, onImageUpdate }) => {
               toast.success("Cover image updated successfully");
             }
           } catch (e) {
-            console.warn("Could not cache new cover image:", e);
+            console.warn("Could not update cover image on disk:", e);
           }
 
           // 5. Notify parent component to update UI
@@ -166,16 +164,14 @@ const EditCoverDialog = ({ open, onOpenChange, gameName, onImageUpdate }) => {
       }
     } else if (activeTab === "upload" && customImage.preview) {
       try {
-        // 3. Update localStorage with new image
-        localStorage.setItem(localStorageKey, customImage.preview);
-
-        // 4. Update the image on disk via Electron IPC
+        // 3. Update the image on disk via Electron IPC (no localStorage
+        // caching - quota issues with base64 data URLs)
         if (window.electron && window.electron.updateGameCover) {
           await window.electron.updateGameCover(gameName, null, customImage.preview);
           toast.success("Custom cover image saved successfully");
         } else {
-          console.warn("Electron IPC not available, image only saved to localStorage");
-          toast.warning("Image saved locally only");
+          console.warn("Electron IPC not available, image cannot be persisted");
+          toast.warning("Image only displayed in this session");
         }
 
         // 5. Notify parent component to update UI

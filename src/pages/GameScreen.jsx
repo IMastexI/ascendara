@@ -1058,12 +1058,10 @@ export default function GameScreen() {
         console.log(
           `[GameScreen] Received game-assets-updated IPC event for ${data.game}`
         );
-        // Clear localStorage cache and reload the grid image
         const gameId = game.game || game.name;
-        const localStorageKey = `game-grid-${gameId}`;
-        localStorage.removeItem(localStorageKey);
 
-        // Fetch the new grid image
+        // Fetch the new grid image (no localStorage caching - data URLs blow
+        // out the per-origin localStorage quota; IPC reads from disk are fast)
         try {
           const gridBase64 = await window.electron.ipcRenderer.invoke(
             "get-game-image",
@@ -1073,7 +1071,6 @@ export default function GameScreen() {
           if (gridBase64) {
             const dataUrl = `data:image/jpeg;base64,${gridBase64}`;
             setImageData(dataUrl);
-            localStorage.setItem(localStorageKey, dataUrl);
           }
         } catch (e) {
           console.error("[GameScreen] Error loading new grid image:", e);
@@ -1218,8 +1215,8 @@ export default function GameScreen() {
     let isMounted = true;
     const gameId = game.game || game.name;
 
-    // Change the cache key to not load the old header
-    const localStorageKey = `game-grid-${gameId}`;
+    // Image data URLs are NOT cached in localStorage (quota issues). The
+    // backend stores cover/grid images on disk and IPC reads are fast.
 
     const loadGameImage = async () => {
       // 1. Try fetching Grid image from backend first (Priority)
@@ -1234,9 +1231,6 @@ export default function GameScreen() {
           const dataUrl = `data:image/jpeg;base64,${gridBase64}`;
           setImageData(dataUrl);
           setHasGridImage(true);
-          try {
-            localStorage.setItem(localStorageKey, dataUrl);
-          } catch (e) {}
           return;
         }
       } catch (e) {}
@@ -1244,45 +1238,23 @@ export default function GameScreen() {
       // Grid image failed, mark as not available
       setHasGridImage(false);
 
-      // 2. Try localStorage cache as fallback
-      const cachedImage = localStorage.getItem(localStorageKey);
-      if (cachedImage) {
-        if (isMounted) {
-          setImageData(cachedImage);
-          setHasGridImage(true);
-        }
-        return;
-      }
-
-      // 3. Fallback (Header)
+      // 2. Fallback (Header) - Steam cover URL
       if (steamData?.cover?.url) {
         const coverUrl = steamService.formatImageUrl(steamData.cover.url, "cover_big");
         if (coverUrl && isMounted) {
           setImageData(coverUrl);
           setHasGridImage(true);
-          // Cache the Steam cover URL
-          try {
-            localStorage.setItem(localStorageKey, coverUrl);
-          } catch (e) {
-            console.warn("Could not cache game image:", e);
-          }
           return;
         }
       }
 
-      // Otherwise, fetch from Electron
+      // 3. Otherwise, fetch from Electron (cover image on disk)
       try {
         const imageBase64 = await window.electron.getGameImage(gameId);
         if (imageBase64 && isMounted) {
           const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
           setImageData(dataUrl);
           setHasGridImage(true);
-          try {
-            localStorage.setItem(localStorageKey, dataUrl);
-          } catch (e) {
-            // If storage quota exceeded, skip caching
-            console.warn("Could not cache game image:", e);
-          }
         }
       } catch (error) {
         console.error("Error loading game image:", error);
@@ -1295,12 +1267,6 @@ export default function GameScreen() {
       if (gameName === gameId && dataUrl && isMounted) {
         console.log(`[GameScreen] Received cover update for ${gameName}`);
         setImageData(dataUrl);
-        // Update localStorage cache
-        try {
-          localStorage.setItem(localStorageKey, dataUrl);
-        } catch (e) {
-          console.warn("Could not cache updated game image:", e);
-        }
       }
     };
 

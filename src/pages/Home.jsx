@@ -262,22 +262,13 @@ const MiniRecentCard = memo(({ game, onPlay }) => {
     if (imageLoadedRef.current) return;
     const loadImage = async () => {
       const gameId = game.game || game.name;
-      const localStorageKey = `game-cover-${gameId}`;
-      const cachedImage = localStorage.getItem(localStorageKey);
-      if (cachedImage) {
-        imageLoadedRef.current = true;
-        setImageData(cachedImage);
-        return;
-      }
+      // No localStorage caching - data URLs blow out the per-origin localStorage
+      // quota; IPC reads from disk are fast and React state holds the result.
       try {
         const imageBase64 = await window.electron.getGameImage(gameId);
         if (imageBase64) {
-          const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
           imageLoadedRef.current = true;
-          setImageData(dataUrl);
-          try {
-            localStorage.setItem(localStorageKey, dataUrl);
-          } catch (e) {}
+          setImageData(`data:image/jpeg;base64,${imageBase64}`);
         }
       } catch (error) {}
     };

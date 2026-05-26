@@ -257,16 +257,8 @@ const GameCard = memo(function GameCard({ game, compact }) {
         };
         playLaterGames.push(gameToSave);
         localStorage.setItem("play-later-games", JSON.stringify(playLaterGames));
-
-        // Cache the image if available
-        if (cachedImage) {
-          try {
-            localStorage.setItem(`play-later-image-${game.game}`, cachedImage);
-          } catch (e) {
-            console.warn("Could not cache play later image:", e);
-          }
-        }
-
+        // play-later card images are no longer cached in localStorage (quota
+        // issues); fetched on demand via IPC / SteamGridDB instead.
         setIsPlayLater(true);
       }
       // Dispatch event so Library can update

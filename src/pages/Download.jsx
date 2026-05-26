@@ -536,15 +536,8 @@ export default function DownloadPage() {
       };
       playLaterGames.push(gameToSave);
       localStorage.setItem("play-later-games", JSON.stringify(playLaterGames));
-
-      if (cachedImage) {
-        try {
-          localStorage.setItem(`play-later-image-${gameData.game}`, cachedImage);
-        } catch (e) {
-          console.warn("Could not cache play later image:", e);
-        }
-      }
-
+      // play-later card images are no longer cached in localStorage (quota
+      // issues); they're fetched on demand via IPC / SteamGridDB instead.
       setIsPlayLater(true);
     }
     window.dispatchEvent(new CustomEvent("play-later-updated"));

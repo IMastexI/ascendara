@@ -841,26 +841,14 @@ const Profile = () => {
     const LoadGameImages = async () => {
       const Images = {};
 
+      // Image data URLs are not cached in localStorage (per-origin quota is
+      // tiny relative to base64 image sizes); IPC reads from disk are fast.
       for (const Game of Games) {
         try {
           const GameId = Game.game || Game.name;
-          const LocalStorageKey = `game-cover-${GameId}`;
-          const CachedImage = localStorage.getItem(LocalStorageKey);
-
-          if (CachedImage) {
-            Images[GameId] = CachedImage;
-            continue;
-          }
-
           const ImageBase64 = await window.electron.getGameImage(GameId);
           if (ImageBase64) {
-            const DataUrl = `data:image/jpeg;base64,${ImageBase64}`;
-            Images[GameId] = DataUrl;
-            try {
-              localStorage.setItem(LocalStorageKey, DataUrl);
-            } catch (Error) {
-              console.warn(`[Profile] couldnt cache game cover`, Error);
-            }
+            Images[GameId] = `data:image/jpeg;base64,${ImageBase64}`;
           }
         } catch (Error) {
           console.error(`[Profile] game cover load failed`, Error);
@@ -877,18 +865,7 @@ const Profile = () => {
       if (!Games.some(Game => (Game.game || Game.name) === GameName)) return;
 
       console.log(`[Profile] got cover update for ${GameName}`);
-      SetGameImages(PrevImages => {
-        const NewImages = { ...PrevImages, [GameName]: DataUrl };
-
-        try {
-          const LocalStorageKey = `game-cover-${GameName}`;
-          localStorage.setItem(LocalStorageKey, DataUrl);
-        } catch (Error) {
-          console.warn(`[Profile] couldnt cache cover`, Error);
-        }
-
-        return NewImages;
-      });
+      SetGameImages(PrevImages => ({ ...PrevImages, [GameName]: DataUrl }));
     };
 
     window.addEventListener("game-cover-updated", HandleCoverUpdate);

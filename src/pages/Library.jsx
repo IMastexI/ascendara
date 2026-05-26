@@ -569,17 +569,15 @@ const Library = () => {
 
           setCloudOnlyGames(cloudOnly);
 
-          // Load images for cloud-only games (only for non-custom games with gameID)
+          // Load images for cloud-only games (only for non-custom games with gameID).
+          // Image data URLs are NOT cached in localStorage (quota issues); React
+          // state holds them in-memory for the lifetime of the page.
           const images = {};
           for (const game of cloudOnly
             .filter(g => g.gameID && !g.isCustom)
             .slice(0, 20)) {
             try {
-              const localStorageKey = `game-cover-${game.name}`;
-              const cachedImage = localStorage.getItem(localStorageKey);
-              if (cachedImage) {
-                images[game.name] = cachedImage;
-              } else if (game.gameID) {
+              if (game.gameID) {
                 // For local index, we need to find the game's imgID
                 let imageId = game.gameID;
                 let imageLoaded = false;
@@ -588,13 +586,7 @@ const Library = () => {
                 try {
                   const imageBase64 = await window.electron.getGameImage(game.name);
                   if (imageBase64) {
-                    const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
-                    images[game.name] = dataUrl;
-                    try {
-                      localStorage.setItem(localStorageKey, dataUrl);
-                    } catch (e) {
-                      console.warn("Could not cache cloud game image:", e);
-                    }
+                    images[game.name] = `data:image/jpeg;base64,${imageBase64}`;
                     imageLoaded = true;
                   }
                 } catch (error) {
@@ -609,13 +601,7 @@ const Library = () => {
 
                     const localImagePath = `${settings.localIndex}/imgs/${imageId}.jpg`;
                     const imageData = await window.electron.ipcRenderer.readFile(localImagePath, "base64");
-                    const dataUrl = `data:image/jpeg;base64,${imageData}`;
-                    images[game.name] = dataUrl;
-                    try {
-                      localStorage.setItem(localStorageKey, dataUrl);
-                    } catch (e) {
-                      console.warn("Could not cache cloud game image:", e);
-                    }
+                    images[game.name] = `data:image/jpeg;base64,${imageData}`;
                     imageLoaded = true;
                   } catch (localError) {
                     console.warn("Could not load from local index:", localError);
@@ -635,11 +621,6 @@ const Library = () => {
                         reader.readAsDataURL(blob);
                       });
                       images[game.name] = dataUrl;
-                      try {
-                        localStorage.setItem(localStorageKey, dataUrl);
-                      } catch (e) {
-                        console.warn("Could not cache cloud game image:", e);
-                      }
                     }
                   } catch (error) {
                     console.error("Error loading cloud game image from API:", error);
@@ -2132,31 +2113,17 @@ const InstalledGameCard = memo(
       };
     }, [game.game, game.name]); // Only depend on game ID properties
 
-    // Load game image with localStorage cache
+    // Load game image via IPC (no localStorage caching - data URLs blow out
+    // the per-origin localStorage quota; IPC reads from disk are fast)
     useEffect(() => {
       let isMounted = true;
       const gameId = game.game || game.name;
-      const localStorageKey = `game-cover-${gameId}`; // Use consistent key naming
 
       const loadGameImage = async () => {
-        // Try localStorage first
-        const cachedImage = localStorage.getItem(localStorageKey);
-        if (cachedImage) {
-          if (isMounted) setImageData(cachedImage);
-          return;
-        }
-        // Otherwise, fetch from Electron
         try {
           const imageBase64 = await window.electron.getGameImage(gameId);
           if (imageBase64 && isMounted) {
-            const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
-            setImageData(dataUrl);
-            try {
-              localStorage.setItem(localStorageKey, dataUrl);
-            } catch (e) {
-              // If storage quota exceeded, skip caching
-              console.warn("Could not cache game image:", e);
-            }
+            setImageData(`data:image/jpeg;base64,${imageBase64}`);
           }
         } catch (error) {
           console.error("Error loading game image:", error);
@@ -2484,10 +2451,8 @@ const InstalledGameCard = memo(
                 disabled={!coverSearch.selectedCover}
                 onClick={async () => {
                   if (!coverSearch.selectedCover) return;
-                  // Remove old image from localStorage
-                  const localStorageKey = `game-cover-${game.game || game.name}`;
-                  localStorage.removeItem(localStorageKey);
-                  // Fetch new image and save to localStorage
+                  // Fetch new image (no localStorage cache - persisted to disk
+                  // by the main process via IPC)
                   try {
                     let dataUrl;
                     // For local index, load from local file system
@@ -2525,7 +2490,6 @@ const InstalledGameCard = memo(
                         reader.readAsDataURL(blob);
                       });
                     }
-                    localStorage.setItem(localStorageKey, dataUrl);
                     setImageData(dataUrl);
                     setShowEditCoverDialog(false);
                   } catch (e) {
@@ -3008,18 +2972,12 @@ const PlayLaterGameCard = memo(({ game, onDownload, onRemove }) => {
   const { t } = useLanguage();
   const [imageData, setImageData] = useState(null);
 
-  // Load game image from cache first, then fallback to API
+  // Load Play Later card image (no localStorage caching - quota issues with
+  // base64 data URLs; SteamGridDB lookups are cached in-memory by the service)
   useEffect(() => {
     let isMounted = true;
     const loadImage = async () => {
-      // Try cached image first
-      const cachedImage = localStorage.getItem(`play-later-image-${game.game}`);
-      if (cachedImage) {
-        if (isMounted) setImageData(cachedImage);
-        return;
-      }
-
-      // Try SteamGridDB fallback if no cached image exists
+      // Try SteamGridDB fallback when no imgID is available
       if (game.game && !game.imgID) {
         try {
           const steamGridImageService = await import("@/services/steamGridImageService");
@@ -3027,12 +2985,6 @@ const PlayLaterGameCard = memo(({ game, onDownload, onRemove }) => {
           const imageUrl = steamGridImageService.default.pickUrl(assets, "card");
           if (imageUrl && isMounted) {
             setImageData(imageUrl);
-            // Cache the SteamGridDB image URL for future use
-            try {
-              localStorage.setItem(`play-later-image-${game.game}`, imageUrl);
-            } catch (e) {
-              console.warn("Could not cache SteamGridDB play later image:", e);
-            }
             return;
           }
         } catch (error) {

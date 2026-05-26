@@ -782,26 +782,15 @@ const Ascend = () => {
         .slice(0, 4);
       setRecentGames(sortedGames);
 
-      // Load game images
+      // Load game images via IPC (no localStorage caching - data URLs blow
+      // out the per-origin localStorage quota; IPC is fast)
       const images = {};
       for (const game of sortedGames) {
         try {
           const gameId = game.game || game.name;
-          const localStorageKey = `game-cover-${gameId}`;
-          const cachedImage = localStorage.getItem(localStorageKey);
-          if (cachedImage) {
-            images[gameId] = cachedImage;
-          } else {
-            const imageBase64 = await window.electron.getGameImage(gameId);
-            if (imageBase64) {
-              const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
-              images[gameId] = dataUrl;
-              try {
-                localStorage.setItem(localStorageKey, dataUrl);
-              } catch (e) {
-                console.warn("Could not cache game image:", e);
-              }
-            }
+          const imageBase64 = await window.electron.getGameImage(gameId);
+          if (imageBase64) {
+            images[gameId] = `data:image/jpeg;base64,${imageBase64}`;
           }
         } catch (error) {
           console.error("Error loading game image:", error);
@@ -1026,26 +1015,15 @@ const Ascend = () => {
       // Load images for games
       const images = {};
 
-      // First, load images for local games
+      // First, load images for local games (no localStorage caching - quota
+      // issues with base64 data URLs; IPC reads from disk are fast)
       for (const game of allLocalGames.slice(0, 20)) {
         // Limit to first 20 for performance
         try {
           const gameId = game.game || game.name;
-          const localStorageKey = `game-cover-${gameId}`;
-          const cachedImage = localStorage.getItem(localStorageKey);
-          if (cachedImage) {
-            images[gameId] = cachedImage;
-          } else {
-            const imageBase64 = await window.electron.getGameImage(gameId);
-            if (imageBase64) {
-              const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
-              images[gameId] = dataUrl;
-              try {
-                localStorage.setItem(localStorageKey, dataUrl);
-              } catch (e) {
-                console.warn("Could not cache game image:", e);
-              }
-            }
+          const imageBase64 = await window.electron.getGameImage(gameId);
+          if (imageBase64) {
+            images[gameId] = `data:image/jpeg;base64,${imageBase64}`;
           }
         } catch (error) {
           console.error("Error loading game image:", error);
@@ -1062,31 +1040,19 @@ const Ascend = () => {
         );
 
         for (const game of cloudOnlyGames.slice(0, 20)) {
-          // Limit for performance
+          // Limit for performance (no localStorage caching for data URLs)
           try {
-            const localStorageKey = `game-cover-${game.name}`;
-            const cachedImage = localStorage.getItem(localStorageKey);
-            if (cachedImage) {
-              images[game.name] = cachedImage;
-            } else {
-              // Fetch image from API using gameID
-              const response = await fetch(
-                `https://api.ascendara.app/v3/image/${game.gameID}`
-              );
-              if (response.ok) {
-                const blob = await response.blob();
-                const dataUrl = await new Promise(resolve => {
-                  const reader = new FileReader();
-                  reader.onloadend = () => resolve(reader.result);
-                  reader.readAsDataURL(blob);
-                });
-                images[game.name] = dataUrl;
-                try {
-                  localStorage.setItem(localStorageKey, dataUrl);
-                } catch (e) {
-                  console.warn("Could not cache cloud game image:", e);
-                }
-              }
+            const response = await fetch(
+              `https://api.ascendara.app/v3/image/${game.gameID}`
+            );
+            if (response.ok) {
+              const blob = await response.blob();
+              const dataUrl = await new Promise(resolve => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+              });
+              images[game.name] = dataUrl;
             }
           } catch (error) {
             console.error("Error loading cloud game image:", error);

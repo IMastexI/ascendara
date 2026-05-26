@@ -1942,15 +1942,8 @@ const GameDetailsView = ({
       };
       playLaterGames.push(gameToSave);
       localStorage.setItem("play-later-games", JSON.stringify(playLaterGames));
-
-      if (cachedImage) {
-        try {
-          localStorage.setItem(`play-later-image-${gameName}`, cachedImage);
-        } catch (e) {
-          console.warn("Could not cache play later image:", e);
-        }
-      }
-
+      // play-later card images are no longer cached in localStorage (quota
+      // issues); fetched on demand via IPC / SteamGridDB instead.
       setIsPlayLater(true);
     }
     window.dispatchEvent(new CustomEvent("play-later-updated"));

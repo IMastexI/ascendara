@@ -410,7 +410,45 @@ const enforceCacheBudget = (maxBytes = 2 * 1024 * 1024) => {
   }
 };
 
+/**
+ * One-time purge of legacy base64 image entries that bloat localStorage and
+ * trigger QuotaExceededError. Image data URLs no longer get written to
+ * localStorage going forward, so we sweep any pre-existing entries on first
+ * run after this version ships. Guarded by a sentinel key so it only runs
+ * once per install.
+ */
+const purgeLegacyImageCache = () => {
+  const SENTINEL = "image-cache-purge-v1";
+  try {
+    if (localStorage.getItem(SENTINEL) === "done") return;
+    const prefixes = [
+      "game-cover-",
+      "game-grid-",
+      "game-image-",
+      "play-later-image-",
+      "cloud-game-image-",
+    ];
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && prefixes.some(p => key.startsWith(p))) {
+        toRemove.push(key);
+      }
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+    localStorage.setItem(SENTINEL, "done");
+    if (toRemove.length > 0) {
+      console.log(
+        `[gameInfoCache] Purged ${toRemove.length} legacy image cache entries`
+      );
+    }
+  } catch (error) {
+    console.warn("Error purging legacy image cache:", error);
+  }
+};
+
 // Run cleanup on service initialization
+purgeLegacyImageCache();
 clearExpiredCache();
 enforceCacheBudget();
 

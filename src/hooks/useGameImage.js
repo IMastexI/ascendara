@@ -35,44 +35,21 @@ export function useGameImage(game, options = {}) {
       }
 
       const gameName = game.game || game.name;
-      const localStorageKey = `game-cover-${gameName}`;
 
       try {
         setLoading(true);
 
-        // 1. Check Play Later cache first (if enabled)
-        if (checkPlayLater) {
-          const playLaterImage = localStorage.getItem(`play-later-image-${gameName}`);
-          if (playLaterImage && isMounted) {
-            setImageData(playLaterImage);
-            setLoading(false);
-            return;
-          }
-        }
+        // No localStorage caching for image data URLs - they blow out the
+        // per-origin localStorage quota. IPC + IndexedDB-backed
+        // imageCacheService are fast enough on their own.
 
-        // 2. Check localStorage cache
-        const cachedImage = localStorage.getItem(localStorageKey);
-        if (cachedImage && isMounted) {
-          setImageData(cachedImage);
-          setLoading(false);
-          return;
-        }
-
-        // 3. For installed games (not custom), try to load from game metadata
+        // 1. For installed games (not custom), try to load from game metadata
         // This ensures Library and BigPicture show the same image
         if (!game.isCustom && gameName) {
           try {
             const imageBase64 = await window.electron.getGameImage(gameName);
             if (imageBase64 && isMounted) {
-              const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
-              setImageData(dataUrl);
-              
-              // Cache it
-              try {
-                localStorage.setItem(localStorageKey, dataUrl);
-              } catch (e) {
-                console.warn("Could not cache game image:", e);
-              }
+              setImageData(`data:image/jpeg;base64,${imageBase64}`);
               setLoading(false);
               return;
             }
@@ -82,21 +59,14 @@ export function useGameImage(game, options = {}) {
           }
         }
 
-        // 4. Fall back to API/local index image (via useImageLoader)
+        // 2. Fall back to API/local index image (via useImageLoader)
         if (apiImage && isMounted) {
           setImageData(apiImage);
-          
-          // Cache it
-          try {
-            localStorage.setItem(localStorageKey, apiImage);
-          } catch (e) {
-            console.warn("Could not cache API image:", e);
-          }
           setLoading(false);
           return;
         }
 
-        // 5. Final fallback to game.cover or game.image
+        // 3. Final fallback to game.cover or game.image
         if ((game.cover || game.image) && isMounted) {
           setImageData(game.cover || game.image);
           setLoading(false);
@@ -134,12 +104,8 @@ export function useGameImage(game, options = {}) {
       const { gameName } = event.detail;
       const currentGameName = game?.game || game?.name;
       if (gameName === currentGameName && isMounted) {
-        console.log(`Assets updated for ${gameName}, clearing cache and reloading`);
-        // Clear localStorage cache for this game
-        const localStorageKey = `game-cover-${gameName}`;
-        localStorage.removeItem(localStorageKey);
-        localStorage.removeItem(`play-later-image-${gameName}`);
-        // Trigger reload
+        console.log(`Assets updated for ${gameName}, reloading`);
+        // Trigger reload (no localStorage cache to clear)
         loadImage();
       }
     };

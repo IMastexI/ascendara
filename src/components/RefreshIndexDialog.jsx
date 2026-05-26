@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 const STEAMRIP_POSTS_URL = "https://steamrip.com/wp-json/wp/v2/posts?per_page=1&page=1";
+const STEAMRIP_AJAX_URL = "https://steamrip.com/wp-admin/admin-ajax.php?postviews_id=1&action=tie_postviews";
 
 const RefreshIndexDialog = ({
   open,
@@ -55,13 +56,18 @@ const RefreshIndexDialog = ({
     const checkCloudflareProtection = async () => {
       setCheckingCF(true);
       try {
-        const response = await fetch(STEAMRIP_POSTS_URL, {
-          method: "GET",
-          mode: "cors",
-        });
+        const [postsResponse, ajaxResponse] = await Promise.allSettled([
+          fetch(STEAMRIP_POSTS_URL, { method: "GET", mode: "cors" }),
+          fetch(STEAMRIP_AJAX_URL, { method: "GET", mode: "cors" }),
+        ]);
 
-        if (response.status === 200) {
-          // CF protection is NOT active
+        const postsStatus = postsResponse.status === "fulfilled" ? postsResponse.value.status : 403;
+        const ajaxStatus = ajaxResponse.status === "fulfilled" ? ajaxResponse.value.status : 403;
+
+        console.log(`CF check - posts: ${postsStatus}, admin-ajax: ${ajaxStatus}`);
+
+        if (postsStatus === 200 && ajaxStatus === 200) {
+          // CF protection is NOT active on either endpoint
           console.log("Cloudflare protection is NOT active - cookie not required");
           setCfActive(false);
           // Auto-start refresh without cookie
@@ -73,13 +79,9 @@ const RefreshIndexDialog = ({
             });
             handleClose();
           }, 500);
-        } else if (response.status === 403) {
-          // CF protection is active
-          console.log("Cloudflare protection is active - cookie required");
-          setCfActive(true);
         } else {
-          // Unexpected status, assume CF is active
-          console.log(`Unexpected status ${response.status}, assuming CF is active`);
+          // CF protection is active on at least one endpoint
+          console.log("Cloudflare protection is active - cookie required");
           setCfActive(true);
         }
       } catch (error) {
