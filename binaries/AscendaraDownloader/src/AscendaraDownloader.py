@@ -1189,6 +1189,17 @@ class RobustDownloader:
                     if ext in archive_exts:
                         new_archive = os.path.join(root, file)
                         if new_archive not in processed_archives and new_archive not in archives_to_process:
+                            # Non-first parts of multi-part RAR sets were already consumed
+                            # by unrar when the first part was extracted. Delete them now
+                            # instead of queuing a doomed extraction that leaves GBs on disk.
+                            _mp = re.match(r'^.+\.part(\d+)\.rar$', file, re.IGNORECASE)
+                            if _mp and int(_mp.group(1)) != 1:
+                                logging.info(f"[RobustDownloader] Deleting non-first RAR part (content already extracted): {file}")
+                                try:
+                                    os.remove(new_archive)
+                                except Exception as _e:
+                                    logging.warning(f"[RobustDownloader] Could not delete non-first RAR part: {_e}")
+                                continue
                             archives_to_process.append(new_archive)
                             logging.info(f"[RobustDownloader] Found nested archive: {new_archive}")
                             
@@ -1310,7 +1321,7 @@ class RobustDownloader:
             
             # Use extractall() for dramatically faster extraction (10-100x faster than file-by-file)
             try:
-                zip_ref.extractall(self.download_dir, members=members_to_extract)
+                zip_ref.extractall(self.download_dir, members=members_to_extract, pwd=b'steamrip.com')
                 logging.info(f"[RobustDownloader] Bulk extraction complete")
             except Exception as e:
                 logging.error(f"[RobustDownloader] Bulk extraction failed: {e}")
@@ -1343,10 +1354,134 @@ class RobustDownloader:
         if sys.platform == "win32":
             try:
                 from unrar import rarfile
-                logging.info(f"[RobustDownloader] Extracting RAR with Python unrar library: {archive_path}")
-                return self._extract_rar_with_library(archive_path, watching_data)
             except ImportError:
                 raise RuntimeError("UnRAR library not found. Please reinstall Ascendara.")
+
+            # Probe for encryption: the unrar Python library reads all archive headers
+            # in __init__ without password support, so encrypted archives must be
+            # detected first and extracted via CLI instead.
+            _encrypted = False
+            try:
+                with rarfile.RarFile(archive_path, 'r') as _probe:
+                    pass
+            except Exception as _pe:
+                if 'password' in str(_pe).lower() or 'encrypted' in str(_pe).lower():
+                    _encrypted = True
+                    logging.info(f"[RobustDownloader] Encrypted RAR detected, falling back to CLI extraction with password")
+                else:
+                    raise
+
+            if not _encrypted:
+                logging.info(f"[RobustDownloader] Extracting RAR with Python unrar library: {archive_path}")
+                return self._extract_rar_with_library(archive_path, watching_data)
+
+            # Encrypted archive: use CLI tool with password
+            _CREATE_NO_WINDOW = 0x08000000
+            # WinRAR/UnRAR is the authoritative RAR5 tool - try it first
+            _unrar_paths = [_shutil.which('unrar'), _shutil.which('WinRAR')]
+            try:
+                import winreg as _winreg
+                for _hive in (_winreg.HKEY_LOCAL_MACHINE, _winreg.HKEY_CURRENT_USER):
+                    for _rk in (r'SOFTWARE\WinRAR', r'SOFTWARE\WOW6432Node\WinRAR'):
+                        try:
+                            with _winreg.OpenKey(_hive, _rk) as _k:
+                                for _v in ('exe64', 'exe32'):
+                                    try:
+                                        _exe = _winreg.QueryValueEx(_k, _v)[0]
+                                        _dir = os.path.dirname(_exe)
+                                        _unrar_paths.append(os.path.join(_dir, 'UnRAR.exe'))
+                                        _unrar_paths.append(_exe)
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+            except ImportError:
+                pass
+            _unrar_paths += [
+                r'C:\Program Files\WinRAR\UnRAR.exe',
+                r'C:\Program Files (x86)\WinRAR\UnRAR.exe',
+                r'C:\Program Files\WinRAR\WinRAR.exe',
+                r'C:\Program Files (x86)\WinRAR\WinRAR.exe',
+            ]
+            _unrar_bin = next((p for p in _unrar_paths if p and os.path.isfile(p)), None)
+            _7z_paths = [
+                _shutil.which('7z'), _shutil.which('7za'),
+                r'C:\Program Files\7-Zip\7z.exe',
+                r'C:\Program Files (x86)\7-Zip\7z.exe',
+            ]
+            _7z_bin = next((p for p in _7z_paths if p and os.path.isfile(p)), None)
+            _extraction_success = False
+            if _unrar_bin:
+                logging.info(f"[RobustDownloader] Extracting encrypted RAR with unrar CLI: {_unrar_bin}")
+                _proc = subprocess.Popen(
+                    [_unrar_bin, 'x', '-y', '-psteamrip.com', archive_path, self.download_dir + '/'],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL, text=True,
+                    creationflags=_CREATE_NO_WINDOW
+                )
+                _unrar_count = 0
+                for _line in _proc.stdout:
+                    _ls = _line.strip()
+                    if _ls.startswith('Extracting') or _ls.startswith('...'):
+                        _unrar_count += 1
+                        if _unrar_count % 20 == 0 or _unrar_count <= 5:
+                            _parts = _ls.split()
+                            _fname = os.path.basename(_parts[-1]) if len(_parts) > 1 else "Extracting..."
+                            self._update_extraction_progress(
+                                _fname, self._files_extracted_count + _unrar_count,
+                                max(self._total_files_to_extract, 1), force=True
+                            )
+                _proc.wait()
+                if _proc.returncode in (0, 1):
+                    self._files_extracted_count += _unrar_count
+                    _extraction_success = True
+                else:
+                    _stderr = _proc.stderr.read()
+                    logging.warning(f"[RobustDownloader] unrar failed (exit {_proc.returncode}), trying 7z. stderr: {_stderr[:200]}")
+            if not _extraction_success:
+                if _7z_bin:
+                    logging.info(f"[RobustDownloader] Extracting encrypted RAR with 7z: {_7z_bin}")
+                    _proc = subprocess.Popen(
+                        [_7z_bin, 'x', '-psteamrip.com', f'-o{self.download_dir}', '-y', archive_path],
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        stdin=subprocess.DEVNULL, text=True,
+                        creationflags=_CREATE_NO_WINDOW
+                    )
+                    _7z_count = 0
+                    for _line in _proc.stdout:
+                        _ls = _line.strip()
+                        if 'Extracting' in _ls:
+                            _7z_count += 1
+                            if _7z_count % 20 == 0 or _7z_count <= 5:
+                                _parts = _ls.split()
+                                _fname = os.path.basename(_parts[-1]) if len(_parts) > 1 else "Extracting..."
+                                self._update_extraction_progress(
+                                    _fname, self._files_extracted_count + _7z_count,
+                                    max(self._total_files_to_extract, 1), force=True
+                                )
+                    _proc.wait()
+                    if _proc.returncode in (0, 1):
+                        self._files_extracted_count += _7z_count
+                        _extraction_success = True
+                    else:
+                        _stderr = _proc.stderr.read()
+                        raise RuntimeError(f"7z extraction failed (exit {_proc.returncode}): {_stderr[:200]}")
+                else:
+                    raise RuntimeError(
+                        "Encrypted RAR requires WinRAR or 7-Zip to extract. "
+                        "Please install WinRAR from https://www.rarlab.com/ or 7-Zip from https://7-zip.org/"
+                    )
+            logging.info(f"[RobustDownloader] Encrypted RAR extraction complete")
+            for dirpath, _, filenames in os.walk(self.download_dir):
+                for fname in filenames:
+                    if fname.endswith('.url') or fname.endswith('.rar') or fname.endswith('.zip') or '_CommonRedist' in dirpath:
+                        continue
+                    full_path = os.path.join(dirpath, fname)
+                    key = os.path.relpath(full_path, self.download_dir).replace('\\', '/')
+                    if key not in watching_data:
+                        watching_data[key] = {"size": os.path.getsize(full_path)}
+            self._update_extraction_progress("Complete", self._files_extracted_count, self._total_files_to_extract, force=True)
+            return
         
         # On Linux/macOS, use system unrar binary
         unrar_bin = _shutil.which("unrar") or _shutil.which("unrar-free")
@@ -1372,7 +1507,7 @@ class RobustDownloader:
         last_filename = [""]
 
         proc = subprocess.Popen(
-            [unrar_bin, "x", "-y", archive_path, self.download_dir + "/"],
+            [unrar_bin, "x", "-y", "-psteamrip.com", archive_path, self.download_dir + "/"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -1486,6 +1621,10 @@ class RobustDownloader:
             pass
         
         with rarfile.RarFile(archive_path, 'r') as rar_ref:
+            try:
+                rar_ref.setpassword(b'steamrip.com')
+            except Exception:
+                pass
             # Filter members to extract (exclude .url and _CommonRedist)
             rar_files = [info for info in rar_ref.infolist() 
                         if not info.filename.endswith('.url') and '_CommonRedist' not in info.filename]
@@ -1767,55 +1906,14 @@ class RobustDownloader:
             logging.info(f"[RobustDownloader] Verifying {len(watching_data)} files")
             verify_errors = []
             
-            # Check for unextracted archive files in the download directory
+            # Log any remaining archives as warnings; game content may legitimately include archives,
+            # and archives that failed to delete should not abort an otherwise successful install
             for root, dirs, files in os.walk(self.download_dir):
                 for file in files:
                     if file.endswith('.rar') or file.endswith('.zip') or file.endswith('.7z'):
                         archive_path = os.path.join(root, file)
                         rel_path = os.path.relpath(archive_path, self.download_dir)
-                        verify_errors.append({
-                            "file": rel_path,
-                            "error": "Found unextracted archive file in directory",
-                            "archive_type": os.path.splitext(file)[1]
-                        })
-                        logging.error(f"[RobustDownloader] Found unextracted archive: {rel_path}")
-            
-            # If we found unextracted archives, fail immediately
-            if verify_errors:
-                logging.error(f"[RobustDownloader] Verification failed: Found {len(verify_errors)} unextracted archive(s)")
-                
-                # Restore from backup if this is an update
-                if backup_dir:
-                    logging.warning(f"[RobustDownloader] Update failed, restoring from backup")
-                    if self._restore_from_backup(backup_dir):
-                        logging.info(f"[RobustDownloader] Successfully restored original files")
-                        if self.withNotification:
-                            _launch_notification(
-                                self.withNotification,
-                                "Update Failed - Restored",
-                                f"Update failed but original files were restored"
-                            )
-                    else:
-                        logging.error(f"[RobustDownloader] Failed to restore from backup")
-                        if self.withNotification:
-                            _launch_notification(
-                                self.withNotification,
-                                "Update Failed",
-                                f"Update failed and restore failed - backup at {backup_dir}"
-                            )
-                
-                self.game_info["downloadingData"]["verifying"] = False
-                self.game_info["downloadingData"]["verifyError"] = verify_errors
-                safe_write_json(self.game_info_path, self.game_info)
-                
-                if not backup_dir and self.withNotification:
-                    error_count = len(verify_errors)
-                    _launch_notification(
-                        self.withNotification,
-                        "Extraction Failed",
-                        f"Found {error_count} unextracted archive {'file' if error_count == 1 else 'files'}"
-                    )
-                return
+                        logging.warning(f"[RobustDownloader] Found archive after extraction (may be game content or failed cleanup): {rel_path}")
             
             verified_count = 0
             for file_path, file_info in watching_data.items():
