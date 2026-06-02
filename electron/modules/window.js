@@ -51,6 +51,8 @@ function createWindow() {
       webSecurity: false,
       // Must be explicitly true for openDevTools() to work in packaged builds
       devTools: true,
+      // Prevent rendering stalls when the window is idle or in the background
+      backgroundThrottling: false,
     },
   });
 
@@ -133,6 +135,19 @@ function createWindow() {
 
   mainWindow.on("close", () => {
     console.log("Window close event fired");
+  });
+
+  // Recover from GPU/renderer process crashes that cause a black screen
+  mainWindow.webContents.on("render-process-gone", (event, details) => {
+    console.error(`Renderer process gone: ${details.reason} (exitCode: ${details.exitCode})`);
+    if (details.reason === "clean-exit") return;
+    // Defer reload so Chromium can finish crash cleanup first (prevents observer assertion)
+    setTimeout(() => {
+      if (!mainWindow.isDestroyed()) {
+        console.log("Reloading window to recover from renderer crash...");
+        mainWindow.reload();
+      }
+    }, 500);
   });
 
   return mainWindow;

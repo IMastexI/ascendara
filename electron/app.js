@@ -12,7 +12,7 @@
 
 require("dotenv").config();
 
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require("electron");
+const { app, BrowserWindow, Tray, Menu, nativeImage, powerMonitor } = require("electron");
 const http = require("http");
 const https = require("https");
 const path = require("path");
@@ -612,6 +612,17 @@ async function initializeApp() {
         protocol.handleProtocolUrl(protocolUrl);
       });
     }
+
+    // Force repaint after system resume or display wake to fix idle black screens
+    const handleSystemResume = () => {
+      const mainWindow = windowModule.getMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+        console.log("System resumed - forcing window repaint");
+        mainWindow.webContents.invalidate();
+      }
+    };
+    powerMonitor.on("resume", handleSystemResume);
+    powerMonitor.on("unlock-screen", handleSystemResume);
 
     // macOS specific handling
     app.on("activate", () => {
