@@ -322,7 +322,7 @@ function registerDownloadHandlers() {
           headerImagePath = path.join(gameDirectory, existingHeader);
         } else if (imgID) {
           // Only try to download image if imgID is defined
-          if (settings.usingLocalIndex && settings.localIndex) {
+          if (settings.localIndex) {
             const localImagePath = path.join(settings.localIndex, "imgs", `${imgID}.jpg`);
             if (fs.existsSync(localImagePath)) {
               imageBuffer = await fs.promises.readFile(localImagePath);
