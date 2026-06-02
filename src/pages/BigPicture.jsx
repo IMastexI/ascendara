@@ -3048,7 +3048,6 @@ const InstalledGameDetailsView = ({ game, onBack, t, controllerType, onChangeAss
         setIsLaunching(false);
       }, 10000);
 
-      setTimeout(() => toast.success(t("library.gameLaunched", { game: gameName })), 0);
     } catch (error) {
       console.error("Error launching game:", error);
       setTimeout(() => toast.error(t("library.launchFailed")), 0);
