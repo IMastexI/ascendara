@@ -398,50 +398,42 @@ const GameCard = memo(function GameCard({ game, compact }) {
 
             {/* Bottom Info Bar on Image */}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-4 pt-8">
-              <h3 className="mb-2 line-clamp-2 text-lg font-bold leading-tight text-white">
+              <h3 className="line-clamp-2 text-lg font-bold leading-tight text-white">
                 {sanitizeText(game.game)}
               </h3>
-
-              {/* Compact Feature Icons */}
-              {(game.dlc || game.online) && (
-                <div className="flex items-center gap-2">
-                  {game.dlc && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white/10 backdrop-blur-sm transition-all hover:bg-white/20">
-                            <Gift className="h-3.5 w-3.5 text-white" />
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{t("gameCard.dlcTooltip")}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                  {game.online && (
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white/10 backdrop-blur-sm transition-all hover:bg-white/20">
-                            <Gamepad2 className="h-3.5 w-3.5 text-white" />
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{t("gameCard.onlineTooltip")}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
           {/* Content Section */}
-          <div className="space-y-3 p-4">
-            {/* Categories - Compact */}
+          <div className="space-y-2.5 p-4">
+            {/* Categories + DLC/Online pills */}
             <div className="flex flex-wrap gap-1.5">
+              {game.dlc && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge className="gap-1 border-0 bg-violet-500/15 px-2 py-0.5 text-xs text-violet-400 hover:bg-violet-500/25 cursor-default">
+                        <Gift className="h-3 w-3" />
+                        DLC
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent><p>{t("gameCard.dlcTooltip")}</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {game.online && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge className="gap-1 border-0 bg-sky-500/15 px-2 py-0.5 text-xs text-sky-400 hover:bg-sky-500/25 cursor-default">
+                        <Gamepad2 className="h-3 w-3" />
+                        Online
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent><p>{t("gameCard.onlineTooltip")}</p></TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
               {categories.map((cat, index) => (
                 <Badge
                   key={`${cat}-${index}`}

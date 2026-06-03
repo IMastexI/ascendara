@@ -1594,14 +1594,6 @@ const FeaturedGameCard = memo(({ game, onDownload, onContextMenu }) => {
 
         {/* Categories + DLC/Online badges */}
         <div className="mb-4 flex flex-wrap items-center gap-1.5">
-          {gameCategories.map(cat => (
-            <span
-              key={cat}
-              className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs text-white/90 backdrop-blur-sm"
-            >
-              {cat}
-            </span>
-          ))}
           {game.dlc && (
             <span className="flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-xs text-white/90 backdrop-blur-sm">
               <Gift className="h-3 w-3" />
@@ -1614,6 +1606,14 @@ const FeaturedGameCard = memo(({ game, onDownload, onContextMenu }) => {
               {t("gameCard.onlineTooltip")}
             </span>
           )}
+          {gameCategories.map(cat => (
+            <span
+              key={cat}
+              className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs text-white/90 backdrop-blur-sm"
+            >
+              {cat}
+            </span>
+          ))}
         </div>
 
         {/* Button */}
