@@ -1238,10 +1238,6 @@ const Home = memo(() => {
                     <div className="max-w-xl space-y-4">
                       {/* Tags */}
                       <div className="flex flex-wrap gap-2">
-                        <Badge className="bg-primary/90 text-white">
-                          <Sparkles className="mr-1 h-3 w-3" />
-                          Featured
-                        </Badge>
                         {currentGame?.online && (
                           <Badge
                             variant="outline"
