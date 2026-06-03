@@ -254,6 +254,7 @@ contextBridge.exposeInMainWorld("electron", {
   updateGameCover: (gameName, imgID, imageData) =>
     ipcRenderer.invoke("update-game-cover", gameName, imgID, imageData),
   getGameImage: (game, type) => ipcRenderer.invoke("get-game-image", game, type),
+  repairGameImage: game => ipcRenderer.invoke("repair-game-image", game),
   getLocalImageUrl: imagePath => ipcRenderer.invoke("get-local-image-url", imagePath),
   saveGameAsset: (gameName, filename, dataUrl) =>
     ipcRenderer.invoke("save-game-asset", gameName, filename, dataUrl),

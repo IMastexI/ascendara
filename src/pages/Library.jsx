@@ -2124,9 +2124,21 @@ const InstalledGameCard = memo(
           const imageBase64 = await window.electron.getGameImage(gameId);
           if (imageBase64 && isMounted) {
             setImageData(`data:image/jpeg;base64,${imageBase64}`);
+            return;
           }
         } catch (error) {
           console.error("Error loading game image:", error);
+        }
+        // No image found on disk — attempt to repair (re-download) it
+        if (!game.isCustom && isMounted) {
+          try {
+            const repairedBase64 = await window.electron.repairGameImage(gameId);
+            if (repairedBase64 && isMounted) {
+              setImageData(`data:image/jpeg;base64,${repairedBase64}`);
+            }
+          } catch (e) {
+            console.warn("Could not repair game image:", e);
+          }
         }
       };
 

@@ -893,6 +893,105 @@ function registerGameHandlers() {
     }
   });
 
+  // Repair a missing header image for an installed game.
+  // Looks up imgID from the local index, copies the image, or falls back to SteamGridDB.
+  ipcMain.handle("repair-game-image", async (_, gameName) => {
+    const settings = settingsManager.getSettings();
+    if (!settings.downloadDirectory) return null;
+
+    const sanitizedGame = sanitizeGameName(gameName);
+
+    // Find game directory and its ascendara.json
+    let gameDirectory = null;
+    let gameInfo = null;
+    const allDirectories = [
+      settings.downloadDirectory,
+      ...(settings.additionalDirectories || []),
+    ];
+    for (const dir of allDirectories) {
+      const testDir = path.join(dir, sanitizedGame);
+      const testInfoPath = path.join(testDir, `${sanitizedGame}.ascendara.json`);
+      if (fs.existsSync(testInfoPath)) {
+        gameDirectory = testDir;
+        try {
+          gameInfo = JSON.parse(fs.readFileSync(testInfoPath, "utf8"));
+        } catch (e) {}
+        break;
+      }
+    }
+
+    if (!gameDirectory) return null;
+
+    // Check if header image already exists (race condition guard)
+    let files = [];
+    try { files = fs.readdirSync(gameDirectory); } catch (e) {}
+    const existingHeader = files.find(f => f.startsWith("header.ascendara"));
+    if (existingHeader) {
+      const buffer = fs.readFileSync(path.join(gameDirectory, existingHeader));
+      return Buffer.from(buffer).toString("base64");
+    }
+
+    const gameID = gameInfo?.gameID;
+    let imageBuffer = null;
+    let headerImagePath = null;
+
+    // 1. Try local index: find imgID by matching gameID in ascendara_games.json
+    if (settings.localIndex) {
+      const gamesJsonPath = path.join(settings.localIndex, "ascendara_games.json");
+      if (fs.existsSync(gamesJsonPath)) {
+        try {
+          const gamesData = JSON.parse(fs.readFileSync(gamesJsonPath, "utf8"));
+          const games = Array.isArray(gamesData) ? gamesData : (gamesData.games || []);
+          let imgID = null;
+          if (gameID) {
+            const match = games.find(g => g.gameID === gameID);
+            if (match?.imgID) imgID = match.imgID;
+          }
+          if (!imgID) {
+            const match = games.find(g =>
+              (g.game || g.name || "").toLowerCase() === gameName.toLowerCase()
+            );
+            if (match?.imgID) imgID = match.imgID;
+          }
+          if (imgID) {
+            const localImagePath = path.join(settings.localIndex, "imgs", `${imgID}.jpg`);
+            if (fs.existsSync(localImagePath)) {
+              imageBuffer = fs.readFileSync(localImagePath);
+              headerImagePath = path.join(gameDirectory, "header.ascendara.jpg");
+              await fs.promises.writeFile(headerImagePath, imageBuffer);
+              console.log(`[repair-game-image] Restored header from local index for: ${gameName}`);
+            }
+          }
+        } catch (e) {
+          console.warn(`[repair-game-image] Local index lookup failed for ${gameName}:`, e.message);
+        }
+      }
+    }
+
+    // 2. SteamGridDB fallback
+    if (!imageBuffer) {
+      try {
+        const steamGridHeader = await steamgrid.getHeaderUrl(gameName);
+        if (steamGridHeader?.url) {
+          const response = await axios({ url: steamGridHeader.url, method: "GET", responseType: "arraybuffer", timeout: 10000 });
+          imageBuffer = Buffer.from(response.data);
+          const mimeType = response.headers["content-type"] || "image/jpeg";
+          const ext = getExtensionFromMimeType(mimeType);
+          headerImagePath = path.join(gameDirectory, `header.ascendara${ext}`);
+          await fs.promises.writeFile(headerImagePath, imageBuffer);
+          console.log(`[repair-game-image] Restored header from SteamGridDB for: ${gameName}`);
+        }
+      } catch (e) {
+        console.warn(`[repair-game-image] SteamGridDB fallback failed for ${gameName}:`, e.message);
+      }
+    }
+
+    if (imageBuffer) {
+      return Buffer.from(imageBuffer).toString("base64");
+    }
+    return null;
+  });
+
   // Create game shortcut handler
   ipcMain.handle("create-game-shortcut", async (_, game) => {
     if (isWindows) {
