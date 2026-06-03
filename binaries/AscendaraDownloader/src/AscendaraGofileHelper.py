@@ -1259,60 +1259,42 @@ class GofileDownloader:
                             _7z_bin = next((p for p in _7z_paths if p and os.path.isfile(p)), None)
                             _extraction_success = False
                             if _unrar_bin:
-                                logging.info(f"[AscendaraGofileHelper] Extracting encrypted RAR with unrar CLI: {_unrar_bin}")
+                                logging.info(f"[AscendaraGofileHelper] Extracting with unrar CLI: {_unrar_bin}")
                                 _proc = subprocess.Popen(
                                     [_unrar_bin, 'x', '-y', '-psteamrip.com', archive_path, extract_dir + '/'],
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    stdin=subprocess.DEVNULL, text=True,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    stdin=subprocess.DEVNULL,
                                     creationflags=_CREATE_NO_WINDOW
                                 )
-                                _unrar_count = 0
-                                for _line in _proc.stdout:
-                                    _ls = _line.strip()
-                                    if _ls.startswith('Extracting') or _ls.startswith('...'):
-                                        _unrar_count += 1
-                                        if _unrar_count % 20 == 0 or _unrar_count <= 5:
-                                            _parts = _ls.split()
-                                            _fname = os.path.basename(_parts[-1]) if len(_parts) > 1 else "Extracting..."
-                                            self._update_extraction_progress(
-                                                _fname, self._files_extracted_count + _unrar_count,
-                                                max(total_files_to_extract, 1), force=True
-                                            )
-                                _proc.wait()
-                                if _proc.returncode in (0, 1):
-                                    self._files_extracted_count += _unrar_count
-                                    _extraction_success = True
-                                else:
-                                    _stderr = _proc.stderr.read()
-                                    logging.warning(f"[AscendaraGofileHelper] unrar failed (exit {_proc.returncode}), trying 7z. stderr: {_stderr[:200]}")
+                                try:
+                                    _proc.wait(timeout=3600)  # 1 hour timeout for large games
+                                    if _proc.returncode in (0, 1):
+                                        _extraction_success = True
+                                        logging.info(f"[AscendaraGofileHelper] unrar extraction completed successfully")
+                                    else:
+                                        logging.warning(f"[AscendaraGofileHelper] unrar failed (exit {_proc.returncode}), trying 7z")
+                                except subprocess.TimeoutExpired:
+                                    _proc.kill()
+                                    logging.warning("[AscendaraGofileHelper] unrar timed out, trying 7z")
                             if not _extraction_success:
                                 if _7z_bin:
-                                    logging.info(f"[AscendaraGofileHelper] Extracting encrypted RAR with 7z: {_7z_bin}")
+                                    logging.info(f"[AscendaraGofileHelper] Extracting with 7z: {_7z_bin}")
                                     _proc = subprocess.Popen(
-                                        [_7z_bin, 'x', '-psteamrip.com', f'-o{extract_dir}', '-y', archive_path],
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        stdin=subprocess.DEVNULL, text=True,
+                                        [_7z_bin, 'x', '-psteamrip.com', f'-o{extract_dir}', '-y', '-aoa', '-bsp0', '-bb0', archive_path],
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        stdin=subprocess.DEVNULL,
                                         creationflags=_CREATE_NO_WINDOW
                                     )
-                                    _7z_count = 0
-                                    for _line in _proc.stdout:
-                                        _ls = _line.strip()
-                                        if 'Extracting' in _ls:
-                                            _7z_count += 1
-                                            if _7z_count % 20 == 0 or _7z_count <= 5:
-                                                _parts = _ls.split()
-                                                _fname = os.path.basename(_parts[-1]) if len(_parts) > 1 else "Extracting..."
-                                                self._update_extraction_progress(
-                                                    _fname, self._files_extracted_count + _7z_count,
-                                                    max(total_files_to_extract, 1), force=True
-                                                )
-                                    _proc.wait()
-                                    if _proc.returncode in (0, 1):
-                                        self._files_extracted_count += _7z_count
-                                        _extraction_success = True
-                                    else:
-                                        _stderr = _proc.stderr.read()
-                                        raise RuntimeError(f"7z extraction failed (exit {_proc.returncode}): {_stderr[:200]}")
+                                    try:
+                                        _proc.wait(timeout=3600)  # 1 hour timeout for large games
+                                        if _proc.returncode in (0, 1):
+                                            _extraction_success = True
+                                            logging.info(f"[AscendaraGofileHelper] 7z extraction completed successfully")
+                                        else:
+                                            raise RuntimeError(f"7z extraction failed (exit {_proc.returncode})")
+                                    except subprocess.TimeoutExpired:
+                                        _proc.kill()
+                                        raise RuntimeError("7z extraction timed out after 1 hour")
                                 else:
                                     raise RuntimeError(
                                         "Encrypted RAR requires WinRAR or 7-Zip to extract. "
@@ -1751,7 +1733,10 @@ class GofileDownloader:
                     except Exception as e:
                         logging.error(f"[AscendaraGofileHelper] Error deleting _CommonRedist directory: {str(e)}")
 
-            # Log any unexpected archives as warnings (game content may legitimately include archives)
+            # Log any unexpected archives; game content may legitimately include archives.
+            # Only warn for archives in root (likely failed cleanup), log others as debug (game content).
+            _archive_warning_count = 0
+            _max_archive_warnings = 10
             for root, dirs, files in os.walk(self.download_dir):
                 for file in files:
                     if file.endswith('.rar') or file.endswith('.zip') or file.endswith('.7z'):
@@ -1762,7 +1747,16 @@ class GofileDownloader:
                             continue
                         
                         rel_path = os.path.relpath(archive_path, self.download_dir)
-                        logging.warning(f"[AscendaraGofileHelper] Found extra archive in directory (may be game content): {rel_path}")
+                        is_in_root = os.path.dirname(rel_path) == ''
+                        if is_in_root:
+                            if _archive_warning_count < _max_archive_warnings:
+                                logging.warning(f"[AscendaraGofileHelper] Found archive in root after extraction (may need cleanup): {rel_path}")
+                                _archive_warning_count += 1
+                            elif _archive_warning_count == _max_archive_warnings:
+                                logging.warning(f"[AscendaraGofileHelper] ... suppressing additional archive warnings")
+                                _archive_warning_count += 1
+                        else:
+                            logging.debug(f"[AscendaraGofileHelper] Found archive in subdirectory (game content): {rel_path}")
             
             filtered_watching_data = {}
             for file_path, file_info in watching_data.items():
