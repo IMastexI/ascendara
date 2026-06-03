@@ -632,7 +632,7 @@ const ControllerDetectionPrompt = () => {
     const checkForController = () => {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
       const hasController = Array.from(gamepads).some(
-        g => g && g.connected && (g.axes.length >= 2 || g.buttons.length >= 10)
+        g => g && g.connected && g.axes.length >= 2 && g.buttons.length >= 10
       );
 
       if (hasController && !hasPromptedRef.current) {
@@ -659,13 +659,29 @@ const ControllerDetectionPrompt = () => {
     };
   }, [location.pathname]);
 
+  // Dismiss controller prompt when a game launches to prevent it from
+  // remaining open when the window is hidden during gameplay
+  useEffect(() => {
+    const handleGameLaunch = () => {
+      if (showPrompt) {
+        setShowPrompt(false);
+      }
+    };
+
+    window.electron?.ipcRenderer?.on("game-launch-success", handleGameLaunch);
+
+    return () => {
+      window.electron?.ipcRenderer?.off("game-launch-success", handleGameLaunch);
+    };
+  }, [showPrompt]);
+
   useEffect(() => {
     if (!showPrompt) return;
 
     const handleGamepadInput = () => {
       const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
       const gamepad = Array.from(gamepads).find(
-        g => g && g.connected && (g.axes.length >= 2 || g.buttons.length >= 10)
+        g => g && g.connected && g.axes.length >= 2 && g.buttons.length >= 10
       );
 
       if (!gamepad) return;

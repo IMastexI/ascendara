@@ -262,7 +262,7 @@ const getGamepadInput = () => {
   const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
 
   const gp = Array.from(gamepads).find(
-    g => g && g.connected && (g.axes.length >= 2 || g.buttons.length >= 10)
+    g => g && g.connected && g.axes.length >= 2 && g.buttons.length >= 10
   );
 
   if (!gp) return null;
