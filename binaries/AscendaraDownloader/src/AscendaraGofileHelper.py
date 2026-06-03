@@ -1185,7 +1185,17 @@ class GofileDownloader:
                             # Extract files one by one for real-time progress reporting
                             for zip_info in members_to_extract:
                                 try:
-                                    zip_ref.extract(zip_info, extract_dir, pwd=b'steamrip.com')
+                                    zip_ref.extract(zip_info, extract_dir)
+                                except RuntimeError as e:
+                                    if 'password' in str(e).lower() or 'encrypted' in str(e).lower():
+                                        try:
+                                            zip_ref.extract(zip_info, extract_dir, pwd=b'steamrip.com')
+                                        except Exception as e2:
+                                            logging.warning(f"[AscendaraGofileHelper] Failed to extract {zip_info.filename} with password: {e2}")
+                                            continue
+                                    else:
+                                        logging.warning(f"[AscendaraGofileHelper] Failed to extract {zip_info.filename}: {e}")
+                                        continue
                                 except Exception as e:
                                     logging.warning(f"[AscendaraGofileHelper] Failed to extract {zip_info.filename}: {e}")
                                     continue
@@ -1489,7 +1499,14 @@ class GofileDownloader:
                                     zi for zi in zip_ref.infolist()
                                     if not zi.filename.endswith('.url') and '_CommonRedist' not in zi.filename
                                 ]
-                                zip_ref.extractall(extract_dir, members=members_to_extract, pwd=b'steamrip.com')
+                                try:
+                                    zip_ref.extractall(extract_dir, members=members_to_extract)
+                                except RuntimeError as e:
+                                    if 'password' in str(e).lower() or 'encrypted' in str(e).lower():
+                                        logging.info(f"[AscendaraGofileHelper] ZIP is encrypted, retrying with steamrip.com password")
+                                        zip_ref.extractall(extract_dir, members=members_to_extract, pwd=b'steamrip.com')
+                                    else:
+                                        raise
                                 for zi in members_to_extract:
                                     if not zi.is_dir():
                                         self._files_extracted_count += 1

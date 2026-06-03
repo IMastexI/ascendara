@@ -362,8 +362,8 @@ class ChunkedDownloader:
                                 self.total_size = int(total_str)
                                 self.supports_range = True
                     elif 'Content-Length' in range_response.headers and self.total_size is None:
-                        # Some servers return full content-length even with range request
-                        self.total_size = int(range_response.headers['Content-Length'])
+                        if range_response.status_code == 200:
+                            self.total_size = int(range_response.headers['Content-Length'])
                     
                     range_response.close()
                 except Exception as e:
@@ -1349,9 +1349,22 @@ class AscendaraDownloader:
             logging.info(f"[AscendaraDownloader] Extracting {len(members_to_extract)} files (filtered from {len(zip_contents)})")
             
             # Use extractall() for dramatically faster extraction (10-100x faster than file-by-file)
+            # Try without password first; fall back to steamrip.com password for encrypted archives.
             try:
-                zip_ref.extractall(extract_to or self.download_dir, members=members_to_extract, pwd=b'steamrip.com')
+                zip_ref.extractall(extract_to or self.download_dir, members=members_to_extract)
                 logging.info(f"[AscendaraDownloader] Bulk extraction complete")
+            except RuntimeError as e:
+                if 'password' in str(e).lower() or 'encrypted' in str(e).lower():
+                    logging.info(f"[AscendaraDownloader] ZIP is encrypted, retrying with steamrip.com password")
+                    try:
+                        zip_ref.extractall(extract_to or self.download_dir, members=members_to_extract, pwd=b'steamrip.com')
+                        logging.info(f"[AscendaraDownloader] Bulk extraction complete (with password)")
+                    except Exception as e2:
+                        logging.error(f"[AscendaraDownloader] Bulk extraction failed with password: {e2}")
+                        raise
+                else:
+                    logging.error(f"[AscendaraDownloader] Bulk extraction failed: {e}")
+                    raise
             except Exception as e:
                 logging.error(f"[AscendaraDownloader] Bulk extraction failed: {e}")
                 raise
