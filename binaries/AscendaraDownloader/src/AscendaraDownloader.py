@@ -21,7 +21,6 @@ import json
 import time
 import shutil
 import string
-import hashlib
 import logging
 import random
 import re
@@ -1420,9 +1419,10 @@ class AscendaraDownloader:
                     return self._extract_rar_with_library(archive_path, watching_data, extract_to)
                 except Exception as _lib_err:
                     logging.warning(f"[AscendaraDownloader] Python library extraction failed ({_lib_err}), falling back to CLI tools")
-                    _encrypted = True  # Signal to use CLI path below
+                    # Don't assume encryption - just fall back to CLI tools
+                    pass
 
-            # Encrypted or library-failed archive: use CLI tool with password
+            # Use CLI extraction tools (WinRAR/7-Zip) for encrypted archives or when Python library fails
             _CREATE_NO_WINDOW = 0x08000000
             # WinRAR/UnRAR is the authoritative RAR5 tool - try it first
             _unrar_paths = [_shutil.which('unrar'), _shutil.which('WinRAR')]
@@ -1467,7 +1467,10 @@ class AscendaraDownloader:
                     creationflags=_CREATE_NO_WINDOW
                 )
                 try:
-                    _proc.wait(timeout=3600)  # 1 hour timeout for large games
+                    # Dynamic timeout: 4 hours for archives >50GB, otherwise 2 hours
+                    archive_size = os.path.getsize(archive_path) if os.path.exists(archive_path) else 0
+                    timeout_seconds = 14400 if archive_size > 50 * 1024 * 1024 * 1024 else 7200
+                    _proc.wait(timeout=timeout_seconds)
                     if _proc.returncode in (0, 1):
                         _extraction_success = True
                         logging.info(f"[AscendaraDownloader] unrar extraction completed successfully")
@@ -1488,7 +1491,10 @@ class AscendaraDownloader:
                         creationflags=_CREATE_NO_WINDOW
                     )
                     try:
-                        _proc.wait(timeout=3600)  # 1 hour timeout for large games
+                        # Dynamic timeout: 4 hours for archives >50GB, otherwise 2 hours
+                        archive_size = os.path.getsize(archive_path) if os.path.exists(archive_path) else 0
+                        timeout_seconds = 14400 if archive_size > 50 * 1024 * 1024 * 1024 else 7200
+                        _proc.wait(timeout=timeout_seconds)
                         if _proc.returncode in (0, 1):
                             _extraction_success = True
                             logging.info(f"[AscendaraDownloader] 7z extraction completed successfully")
@@ -1496,13 +1502,13 @@ class AscendaraDownloader:
                             raise RuntimeError(f"7z extraction failed (exit {_proc.returncode})")
                     except subprocess.TimeoutExpired:
                         _proc.kill()
-                        raise RuntimeError("7z extraction timed out after 1 hour")
+                        raise RuntimeError(f"7z extraction timed out after {timeout_seconds // 3600} hour(s)")
                 else:
                     raise RuntimeError(
-                        "Encrypted RAR requires WinRAR or 7-Zip to extract. "
+                        "RAR extraction failed. WinRAR or 7-Zip is required to extract this archive. "
                         "Please install WinRAR from https://www.rarlab.com/ or 7-Zip from https://7-zip.org/"
                     )
-            logging.info(f"[AscendaraDownloader] Encrypted RAR extraction complete")
+            logging.info(f"[AscendaraDownloader] RAR extraction with CLI tools complete")
             for dirpath, _, filenames in os.walk(self.download_dir):
                 for fname in filenames:
                     if fname.endswith('.url') or fname.endswith('.rar') or fname.endswith('.zip') or '_CommonRedist' in dirpath:
@@ -1670,9 +1676,28 @@ class AscendaraDownloader:
             
             logging.info(f"[AscendaraDownloader] Extracting {len(rar_files)} files from RAR")
             
-            # Extract file-by-file for accurate per-file progress reporting
-            extraction_error = []
             dest_dir = extract_to or self.download_dir
+            
+            # For archives with many files, use fast bulk extraction to avoid threading overhead
+            # This is 5-10x faster than file-by-file extraction
+            if len(rar_files) > 100:
+                logging.info(f"[AscendaraDownloader] Using fast bulk extraction for {len(rar_files)} files")
+                try:
+                    # Extract all files at once (much faster)
+                    rar_ref.extractall(dest_dir)
+                    # Update progress to show completion
+                    local_extracted = len(rar_files)
+                    self._files_extracted_count += local_extracted
+                    self._update_extraction_progress("Bulk extraction complete", self._files_extracted_count, self._total_files_to_extract, force=True)
+                    logging.info(f"[AscendaraDownloader] Fast bulk extraction complete: {local_extracted} files")
+                    return
+                except Exception as bulk_err:
+                    logging.warning(f"[AscendaraDownloader] Bulk extraction failed, falling back to file-by-file: {bulk_err}")
+                    # Reset count and fall back to file-by-file
+                    self._files_extracted_count = initial_file_count
+            
+            # Extract file-by-file for accurate per-file progress reporting (or as fallback)
+            extraction_error = []
             local_extracted = 0
             heartbeat_count = 0
             last_heartbeat_time = time.time()
@@ -1696,7 +1721,7 @@ class AscendaraDownloader:
                         last_heartbeat_time = now
                     continue
 
-                EXTRACT_TIMEOUT = 600  # 10 minutes per file before declaring a hang
+                EXTRACT_TIMEOUT = 1800  # 30 minutes per file before declaring a hang (for large files)
                 extract_exc = []
                 def _do_extract():
                     try:

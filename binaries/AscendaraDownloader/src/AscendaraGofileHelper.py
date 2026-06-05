@@ -1277,7 +1277,10 @@ class GofileDownloader:
                                     creationflags=_CREATE_NO_WINDOW
                                 )
                                 try:
-                                    _proc.wait(timeout=3600)  # 1 hour timeout for large games
+                                    # Dynamic timeout: 4 hours for archives >50GB, otherwise 2 hours
+                                    archive_size = os.path.getsize(archive_path) if os.path.exists(archive_path) else 0
+                                    timeout_seconds = 14400 if archive_size > 50 * 1024 * 1024 * 1024 else 7200
+                                    _proc.wait(timeout=timeout_seconds)
                                     if _proc.returncode in (0, 1):
                                         _extraction_success = True
                                         logging.info(f"[AscendaraGofileHelper] unrar extraction completed successfully")
@@ -1296,7 +1299,10 @@ class GofileDownloader:
                                         creationflags=_CREATE_NO_WINDOW
                                     )
                                     try:
-                                        _proc.wait(timeout=3600)  # 1 hour timeout for large games
+                                        # Dynamic timeout: 4 hours for archives >50GB, otherwise 2 hours
+                                        archive_size = os.path.getsize(archive_path) if os.path.exists(archive_path) else 0
+                                        timeout_seconds = 14400 if archive_size > 50 * 1024 * 1024 * 1024 else 7200
+                                        _proc.wait(timeout=timeout_seconds)
                                         if _proc.returncode in (0, 1):
                                             _extraction_success = True
                                             logging.info(f"[AscendaraGofileHelper] 7z extraction completed successfully")
@@ -1304,13 +1310,13 @@ class GofileDownloader:
                                             raise RuntimeError(f"7z extraction failed (exit {_proc.returncode})")
                                     except subprocess.TimeoutExpired:
                                         _proc.kill()
-                                        raise RuntimeError("7z extraction timed out after 1 hour")
+                                        raise RuntimeError(f"7z extraction timed out after {timeout_seconds // 3600} hour(s)")
                                 else:
                                     raise RuntimeError(
-                                        "Encrypted RAR requires WinRAR or 7-Zip to extract. "
+                                        "RAR extraction failed. WinRAR or 7-Zip is required to extract this archive. "
                                         "Please install WinRAR from https://www.rarlab.com/ or 7-Zip from https://7-zip.org/"
                                     )
-                            logging.info(f"[AscendaraGofileHelper] Encrypted RAR extraction complete")
+                            logging.info(f"[AscendaraGofileHelper] RAR extraction with CLI tools complete")
                             self._update_extraction_progress("Complete", self._files_extracted_count, max(total_files_to_extract, 1), force=True)
                         else:
                             with rarfile.RarFile(archive_path, 'r') as rar_ref:
