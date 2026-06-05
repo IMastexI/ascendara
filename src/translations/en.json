@@ -2501,6 +2501,13 @@
       "infoBoxWine": "works but may require manual configuration for DirectX games.",
       "noRunnersWarning": "No Proton or Wine installation detected. Download Proton-GE below.",
       "notInstalled": "Not installed",
+      "umu": {
+        "launcher": {
+          "installSuccess": "UMU-Launcher installed successfully",
+          "installFailed": "Failed to install UMU-Launcher",
+          "installError": "Error installing UMU-Launcher"
+        }
+      },
       "protonConfirm": {
         "aboutToDownloadPrefix": "You are about to download",
         "cancel": "Cancel",
