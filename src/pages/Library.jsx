@@ -99,6 +99,9 @@ import {
   getGamesInFolders,
 } from "@/lib/folderManager";
 
+// Module-level cache so images survive page switches without re-fetching via IPC
+const gameImageCache = new Map();
+
 const Library = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedGames, setSelectedGames] = useState([]);
@@ -2057,7 +2060,7 @@ const InstalledGameCard = memo(
     const navigate = useNavigate();
     const [isRunning, setIsRunning] = useState(false);
     const [isHovered, setIsHovered] = useState(false);
-    const [imageData, setImageData] = useState(null);
+    const [imageData, setImageData] = useState(() => gameImageCache.get(game.game || game.name) ?? null);
     const [executableExists, setExecutableExists] = useState(null);
     const [contextMenuOpen, setContextMenuOpen] = useState(false);
     const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
@@ -2114,16 +2117,22 @@ const InstalledGameCard = memo(
     }, [game.game, game.name]); // Only depend on game ID properties
 
     // Load game image via IPC (no localStorage caching - data URLs blow out
-    // the per-origin localStorage quota; IPC reads from disk are fast)
+    // the per-origin localStorage quota; IPC reads from disk are fast).
+    // Module-level gameImageCache keeps images in memory across page switches.
     useEffect(() => {
       let isMounted = true;
       const gameId = game.game || game.name;
 
       const loadGameImage = async () => {
+        // Already cached from a previous mount — no IPC call needed
+        if (gameImageCache.has(gameId)) return;
+
         try {
           const imageBase64 = await window.electron.getGameImage(gameId);
           if (imageBase64 && isMounted) {
-            setImageData(`data:image/jpeg;base64,${imageBase64}`);
+            const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
+            gameImageCache.set(gameId, dataUrl);
+            setImageData(dataUrl);
             return;
           }
         } catch (error) {
@@ -2134,7 +2143,9 @@ const InstalledGameCard = memo(
           try {
             const repairedBase64 = await window.electron.repairGameImage(gameId);
             if (repairedBase64 && isMounted) {
-              setImageData(`data:image/jpeg;base64,${repairedBase64}`);
+              const dataUrl = `data:image/jpeg;base64,${repairedBase64}`;
+              gameImageCache.set(gameId, dataUrl);
+              setImageData(dataUrl);
             }
           } catch (e) {
             console.warn("Could not repair game image:", e);
@@ -2147,6 +2158,7 @@ const InstalledGameCard = memo(
         const { gameName, dataUrl } = event.detail;
         if (gameName === gameId && dataUrl && isMounted) {
           console.log(`Received cover update for ${gameName}`);
+          gameImageCache.set(gameId, dataUrl);
           setImageData(dataUrl);
         }
       };

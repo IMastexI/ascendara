@@ -736,7 +736,10 @@ const formatImageUrl = (url, size = "screenshot_big") => {
     url = `https:${url}`;
   }
 
-  return url;
+  // Add cache-busting to fix NEBULA_CACHE_OPERATION_NOT_SUPPORTED error
+  // This prevents Chrome/Electron caching issues with Steam's CDN
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}_cb=${Date.now()}`;
 };
 
 // Export the service functions
