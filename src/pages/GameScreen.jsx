@@ -620,6 +620,319 @@ const PurchasePromptDialog = ({ open, onClose, gameName, appId, t }) => {
   );
 };
 
+const FIELD_META = {
+  game:           { label: "Game Name",          desc: "The display name of the game.",                          type: "text",   readonly: true                },
+  version:        { label: "Version",            desc: "The installed version string.",                          type: "text"                                  },
+  size:           { label: "Install Size",       desc: "Disk size reported at download time.",                   type: "text"                                  },
+  executable:     { label: "Primary Executable", desc: "Path to the main .exe that Ascendara launches.",         type: "text"                                  },
+  launchCommands: { label: "Launch Commands",    desc: "Extra CLI arguments passed when launching the game.",    type: "text"                                  },
+  online:         { label: "Online Fix",         desc: "Whether the game uses an online / Steamworks fix.",      type: "bool"                                  },
+  dlc:            { label: "Includes DLC",       desc: "Whether DLC content is bundled with this install.",      type: "bool"                                  },
+  isVr:           { label: "VR Game",            desc: "Whether this game requires a VR headset.",               type: "bool"                                  },
+  favorite:       { label: "Favorite",           desc: "Marks the game as a favorite in your library.",          type: "bool"                                  },
+  backups:        { label: "Auto-Backups",       desc: "Whether automatic save-file backups are enabled.",       type: "bool"                                  },
+  isRunning:      { label: "Is Running",         desc: "Live flag — true while the game process is active.",     type: "bool",   readonly: true                },
+  hasRated:       { label: "Has Been Rated",     desc: "Whether you have submitted a rating for this game.",     type: "bool",   readonly: true, leaderboard: true },
+  launchCount:    { label: "Launch Count",       desc: "Total number of times you have launched this game.",     type: "number", readonly: true, leaderboard: true },
+  playTime:       { label: "Play Time (min)",    desc: "Total play time tracked by Ascendara, in minutes.",      type: "number", readonly: true, leaderboard: true },
+  lastPlayed:     { label: "Last Played",        desc: "Timestamp of the last session (null if never played).",  type: "text",   readonly: true                },
+  executables:    { label: "All Executables",    desc: "List of known executables for this game.",               type: "array"                                 },
+};
+
+const LEADERBOARD_KEYS = Object.entries(FIELD_META)
+  .filter(([, m]) => m.leaderboard)
+  .map(([k]) => k);
+
+const EditGameEntryDialog = ({ open, onClose, gameName, isCustom, t, onSaved, isAuthenticated }) => {
+  const [fields, setFields] = useState({});
+  const [originalFields, setOriginalFields] = useState({});
+  const [rawTab, setRawTab] = useState(false);
+  const [jsonText, setJsonText] = useState("");
+  const [jsonError, setJsonError] = useState(null);
+  const [rawWarnKeys, setRawWarnKeys] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open && gameName) {
+      setLoading(true);
+      setJsonError(null);
+      setRawTab(false);
+      setRawWarnKeys([]);
+      window.electron.readGameEntry(gameName, isCustom).then(result => {
+        if (result.success) {
+          setFields(result.data);
+          setOriginalFields(result.data);
+          setJsonText(JSON.stringify(result.data, null, 2));
+        } else {
+          setJsonError(result.error || "Failed to load game entry");
+        }
+        setLoading(false);
+      });
+    }
+  }, [open, gameName, isCustom]);
+
+  const handleFieldChange = (key, value) => {
+    const updated = { ...fields, [key]: value };
+    setFields(updated);
+    setJsonText(JSON.stringify(updated, null, 2));
+    setJsonError(null);
+  };
+
+  const handleRawChange = value => {
+    setJsonText(value);
+    try {
+      const parsed = JSON.parse(value);
+      // Detect if any leaderboard-sensitive keys were changed
+      if (isAuthenticated) {
+        const tampered = LEADERBOARD_KEYS.filter(
+          k => k in originalFields && JSON.stringify(parsed[k]) !== JSON.stringify(originalFields[k])
+        );
+        if (tampered.length > 0) {
+          // Revert those keys back to original values
+          tampered.forEach(k => { parsed[k] = originalFields[k]; });
+          const reverted = JSON.stringify(parsed, null, 2);
+          setJsonText(reverted);
+          setFields(parsed);
+          setRawWarnKeys(tampered);
+        } else {
+          setFields(parsed);
+          setRawWarnKeys([]);
+        }
+      } else {
+        setFields(parsed);
+        setRawWarnKeys([]);
+      }
+      setJsonError(null);
+    } catch (e) {
+      setJsonError(e.message);
+    }
+  };
+
+  const handleSave = async () => {
+    const data = rawTab ? (() => { try { return JSON.parse(jsonText); } catch { return null; } })() : fields;
+    if (!data) { toast.error(t("gameScreen.editGameEntryInvalidJson")); return; }
+    setSaving(true);
+    const result = await window.electron.writeGameEntry(gameName, data, isCustom);
+    setSaving(false);
+    if (result.success) {
+      toast.success(t("gameScreen.editGameEntrySuccess"));
+      if (onSaved) onSaved(data);
+      onClose();
+    } else {
+      toast.error(t("gameScreen.editGameEntryError"));
+    }
+  };
+
+  const knownKeys = Object.keys(FIELD_META);
+  const extraKeys = Object.keys(fields).filter(k => !knownKeys.includes(k));
+
+  const renderField = key => {
+    const meta = FIELD_META[key];
+    const value = fields[key];
+    const isDisabled = !!meta.readonly;
+
+    const wrapperClass = `rounded-lg border px-4 py-3 ${
+      isDisabled
+        ? "border-border bg-muted/10 opacity-60"
+        : "border-border bg-muted/20"
+    }`;
+
+    if (meta.type === "bool") {
+      return (
+        <div key={key} className={`flex items-center justify-between ${wrapperClass}`}>
+          <div className="flex-1 pr-4">
+            <p className={`text-sm font-medium ${isDisabled ? "text-muted-foreground" : "text-foreground"}`}>
+              {meta.label}
+            </p>
+            <p className="text-xs text-muted-foreground">{meta.desc}</p>
+          </div>
+          <Switch checked={!!value} disabled={isDisabled} onCheckedChange={v => handleFieldChange(key, v)} />
+        </div>
+      );
+    }
+
+    if (meta.type === "number") {
+      return (
+        <div key={key} className={wrapperClass}>
+          <p className={`text-sm font-medium ${isDisabled ? "text-muted-foreground" : "text-foreground"}`}>
+            {meta.label}
+          </p>
+          <p className="mb-2 text-xs text-muted-foreground">{meta.desc}</p>
+          <Input
+            type="number"
+            value={value ?? ""}
+            disabled={isDisabled}
+            onChange={e => handleFieldChange(key, Number(e.target.value))}
+            className="h-8 w-40 text-sm"
+          />
+        </div>
+      );
+    }
+
+    if (meta.type === "array") {
+      const arr = Array.isArray(value) ? value : [];
+      return (
+        <div key={key} className={wrapperClass}>
+          <p className="text-sm font-medium text-foreground">{meta.label}</p>
+          <p className="mb-2 text-xs text-muted-foreground">{meta.desc}</p>
+          <div className="space-y-1">
+            {arr.map((item, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-xs font-mono text-primary">
+                  {i === 0 ? "primary" : `#${i + 1}`}
+                </span>
+                <span className="truncate font-mono text-xs text-foreground">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div key={key} className={wrapperClass}>
+        <p className={`text-sm font-medium ${isDisabled ? "text-muted-foreground" : "text-foreground"}`}>
+          {meta.label}
+        </p>
+        <p className="mb-2 text-xs text-muted-foreground">{meta.desc}</p>
+        <Input
+          value={value ?? ""}
+          disabled={isDisabled}
+          onChange={e => handleFieldChange(key, e.target.value)}
+          className="h-8 text-sm font-mono"
+        />
+      </div>
+    );
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={onClose}>
+      <AlertDialogContent className="max-w-2xl">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-2xl font-bold text-foreground">
+            {t("gameScreen.editGameEntry")}
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-foreground">
+            {t("gameScreen.editGameEntryDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        {/* Tab bar */}
+        <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+          <button
+            onClick={() => { setRawTab(false); setRawWarnKeys([]); }}
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${!rawTab ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Fields
+          </button>
+          <button
+            onClick={() => setRawTab(true)}
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${rawTab ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Raw JSON
+          </button>
+        </div>
+
+        <div className="max-h-[60vh] overflow-y-auto pr-1">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : rawTab ? (
+            <div className="flex flex-col gap-2">
+              {/* Raw tab leaderboard revert warning */}
+              {rawWarnKeys.length > 0 && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    <span className="font-semibold">Reverted protected fields: </span>
+                    {rawWarnKeys.join(", ")}. Editing these fields can get your Ascend account banned from the leaderboard.
+                  </p>
+                </div>
+              )}
+              <textarea
+                value={jsonText}
+                onChange={e => handleRawChange(e.target.value)}
+                className={`h-80 w-full rounded-lg border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none transition-colors focus:ring-2 focus:ring-primary/50 ${
+                  jsonError ? "border-red-500" : "border-border"
+                }`}
+                spellCheck={false}
+              />
+              {jsonError && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                  <p className="font-mono text-xs text-red-500">{jsonError}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {/* Combined info notice */}
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-yellow-500" />
+                  <span>Greyed-out fields are read-only and managed automatically by Ascendara.</span>
+                </div>
+                {isAuthenticated && (
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
+                    <span><span className="font-semibold text-red-500">Leaderboard: </span>Has Been Rated, Launch Count, and Play Time are protected — tampering can get your Ascend account banned.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Known fields */}
+              {knownKeys.filter(k => k in fields).map(renderField)}
+
+              {/* Unknown extra fields */}
+              {extraKeys.length > 0 && (
+                <>
+                  <p className="mt-2 text-xs font-medium text-muted-foreground">Additional fields</p>
+                  {extraKeys.map(key => (
+                    <div key={key} className="rounded-lg border border-border bg-muted/20 px-4 py-3">
+                      <p className="font-mono text-sm font-medium text-foreground">{key}</p>
+                      <Input
+                        value={typeof fields[key] === "object" ? JSON.stringify(fields[key]) : String(fields[key] ?? "")}
+                        onChange={e => {
+                          let val = e.target.value;
+                          try { val = JSON.parse(val); } catch {}
+                          handleFieldChange(key, val);
+                        }}
+                        className="mt-2 h-8 text-sm font-mono"
+                      />
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <AlertDialogFooter className="mt-2 flex gap-2">
+          <Button variant="outline" className="text-primary" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            className="bg-primary text-secondary"
+            onClick={handleSave}
+            disabled={saving || loading || (rawTab && !!jsonError)}
+          >
+            {saving ? (
+              <>
+                <Loader className="mr-2 h-4 w-4 animate-spin" />
+                {t("common.saving")}
+              </>
+            ) : (
+              t("common.save")
+            )}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
 export default function GameScreen() {
   const showError = (game, error) => {
     setErrorGame(game);
@@ -672,6 +985,7 @@ export default function GameScreen() {
   const [errorGame, setErrorGame] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [showExecutableManager, setShowExecutableManager] = useState(false);
+  const [showEditGameEntry, setShowEditGameEntry] = useState(false);
   const [showExecutableSelect, setShowExecutableSelect] = useState(false);
   const [availableExecutables, setAvailableExecutables] = useState([]);
   const [pendingLaunchOptions, setPendingLaunchOptions] = useState(null);
@@ -2381,6 +2695,17 @@ export default function GameScreen() {
                       />
                     )}
                   </Button>
+
+                  {settings.extraGameOptions && (
+                    <Button
+                      variant="outline"
+                      className="w-full justify-start gap-2"
+                      onClick={() => setShowEditGameEntry(true)}
+                    >
+                      <Settings2 className="h-4 w-4" />
+                      {t("gameScreen.editGameEntry")}
+                    </Button>
+                  )}
 
                   <Button
                     variant="outline"
@@ -4215,6 +4540,19 @@ export default function GameScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit Game Entry Dialog */}
+      <EditGameEntryDialog
+        open={showEditGameEntry}
+        onClose={() => setShowEditGameEntry(false)}
+        gameName={game?.game || game?.name}
+        isCustom={game?.isCustom}
+        t={t}
+        isAuthenticated={isAuthenticated}
+        onSaved={updatedData => {
+          setGame(prev => ({ ...prev, ...updatedData }));
+        }}
+      />
 
       {/* Launch Options Dialog */}
       <AlertDialog

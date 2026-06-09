@@ -286,6 +286,10 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.invoke("save-launch-commands", game, launchCommands, isCustom),
   getLaunchCommands: (game, isCustom) =>
     ipcRenderer.invoke("get-launch-commands", game, isCustom),
+  readGameEntry: (game, isCustom) =>
+    ipcRenderer.invoke("read-game-entry", game, isCustom),
+  writeGameEntry: (game, updatedData, isCustom) =>
+    ipcRenderer.invoke("write-game-entry", game, updatedData, isCustom),
   readGameAchievements: (game, isCustom) =>
     ipcRenderer.invoke("read-game-achievements", game, isCustom),
   getAchievementsLeaderboard: (games, options) =>

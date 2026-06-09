@@ -90,6 +90,7 @@ class SettingsManager {
       customSourcesLibrary: [],
       customLists: [],
       activeCustomList: null,
+      extraGameOptions: false,
     };
     this.initializeSettingsFile();
     this.settings = this.loadSettings();

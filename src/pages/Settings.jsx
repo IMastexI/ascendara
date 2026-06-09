@@ -1951,6 +1951,27 @@ function Settings() {
                     }
                   />
                 </div>
+
+                <div
+                  id="extra-game-options"
+                  className="flex items-center justify-between"
+                >
+                  <div className="space-y-0.5">
+                    <Label>{t("settings.extraGameOptions")}</Label>
+                    <p className="text-sm text-muted-foreground">
+                      {t("settings.extraGameOptionsDescription")}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.extraGameOptions}
+                    onCheckedChange={() =>
+                      handleSettingChange(
+                        "extraGameOptions",
+                        !settings.extraGameOptions
+                      )
+                    }
+                  />
+                </div>
               </div>
             </Card>
 

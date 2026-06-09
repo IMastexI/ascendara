@@ -79,6 +79,7 @@ export function SettingsProvider({ children }) {
     },
     promptPurchaseAfter3Hours: true,
     openOnStartup: false,
+    extraGameOptions: false,
   });
   const settingsRef = useRef(settings);
 
@@ -264,6 +265,7 @@ const defaultSettings = {
   },
   promptPurchaseAfter3Hours: true,
   openOnStartup: false,
+  extraGameOptions: false,
 };
 
 export function useSettings() {
