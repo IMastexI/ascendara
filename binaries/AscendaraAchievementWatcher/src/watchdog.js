@@ -145,29 +145,55 @@ var app = {
 
       if (downloadDir) {
         try {
-          // Only add game folders that have emulator config files
+          // Add game folders that have emulator config files OR .ascendara.json (Ascendara-installed games)
           const gameFolders = await fs.readdir(downloadDir, { withFileTypes: true });
           const emuConfigFiles = [
             "ALI213.ini", "valve.ini", "hlm.ini", "ds.ini",
             "steam_api.ini", "SteamConfig.ini"
           ];
-          
+
           for (const dirent of gameFolders) {
             if (dirent.isDirectory()) {
               const gameFolderPath = path.join(downloadDir, dirent.name);
+              let shouldMonitor = false;
+
               // Check if this folder has any emulator config
-              let hasEmuConfig = false;
               for (const configFile of emuConfigFiles) {
                 try {
                   await fs.access(path.join(gameFolderPath, configFile));
-                  hasEmuConfig = true;
+                  shouldMonitor = true;
+                  console.log(`[Watcher] Adding ${dirent.name} - found emulator config: ${configFile}`);
                   break;
                 } catch (e) {
                   // Config file doesn't exist, continue
                 }
               }
-              
-              if (hasEmuConfig) {
+
+              // Also monitor if folder has .ascendara.json (installed through Ascendara)
+              if (!shouldMonitor) {
+                try {
+                  const ascendaraJsonPath = path.join(gameFolderPath, `${dirent.name}.ascendara.json`);
+                  await fs.access(ascendaraJsonPath);
+                  shouldMonitor = true;
+                  console.log(`[Watcher] Adding ${dirent.name} - found .ascendara.json`);
+                } catch (e) {
+                  // .ascendara.json doesn't exist
+                }
+              }
+
+              // Also monitor if folder has achievements.ascendara.json (previously tracked)
+              if (!shouldMonitor) {
+                try {
+                  const achievementsPath = path.join(gameFolderPath, "achievements.ascendara.json");
+                  await fs.access(achievementsPath);
+                  shouldMonitor = true;
+                  console.log(`[Watcher] Adding ${dirent.name} - found existing achievements.ascendara.json`);
+                } catch (e) {
+                  // achievements file doesn't exist
+                }
+              }
+
+              if (shouldMonitor) {
                 gameDirList.push({
                   path: gameFolderPath,
                   notify: true,
@@ -175,7 +201,7 @@ var app = {
               }
             }
           }
-          console.log(`Found ${gameDirList.length} game directories with emulator configs`);
+          console.log(`Found ${gameDirList.length} game directories to monitor`);
         } catch (err) {
           console.warn("Failed to scan download directory:", err);
         }
@@ -518,21 +544,49 @@ var app = {
             "ALI213.ini", "valve.ini", "hlm.ini", "ds.ini",
             "steam_api.ini", "SteamConfig.ini"
           ];
-          
+
           for (const dirent of gameFolders) {
             if (dirent.isDirectory()) {
               const gameFolderPath = path.join(downloadDir, dirent.name);
-              let hasEmuConfig = false;
+              let shouldMonitor = false;
+
+              // Check if this folder has any emulator config
               for (const configFile of emuConfigFiles) {
                 try {
                   await fs.access(path.join(gameFolderPath, configFile));
-                  hasEmuConfig = true;
+                  shouldMonitor = true;
+                  console.log(`[Watcher] Adding ${dirent.name} - found emulator config: ${configFile}`);
                   break;
                 } catch (e) {
+                  // Config file doesn't exist, continue
                 }
               }
-              
-              if (hasEmuConfig) {
+
+              // Also monitor if folder has .ascendara.json (installed through Ascendara)
+              if (!shouldMonitor) {
+                try {
+                  const ascendaraJsonPath = path.join(gameFolderPath, `${dirent.name}.ascendara.json`);
+                  await fs.access(ascendaraJsonPath);
+                  shouldMonitor = true;
+                  console.log(`[Watcher] Adding ${dirent.name} - found .ascendara.json`);
+                } catch (e) {
+                  // .ascendara.json doesn't exist
+                }
+              }
+
+              // Also monitor if folder has achievements.ascendara.json (previously tracked)
+              if (!shouldMonitor) {
+                try {
+                  const achievementsPath = path.join(gameFolderPath, "achievements.ascendara.json");
+                  await fs.access(achievementsPath);
+                  shouldMonitor = true;
+                  console.log(`[Watcher] Adding ${dirent.name} - found existing achievements.ascendara.json`);
+                } catch (e) {
+                  // achievements file doesn't exist
+                }
+              }
+
+              if (shouldMonitor) {
                 gameDirList.push({
                   path: gameFolderPath,
                   notify: true,
@@ -540,7 +594,7 @@ var app = {
               }
             }
           }
-          console.log(`Found ${gameDirList.length} game directories with emulator configs`);
+          console.log(`Found ${gameDirList.length} game directories to monitor`);
         } catch (err) {
           console.warn("Failed to scan download directory:", err);
         }
