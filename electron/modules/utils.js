@@ -83,7 +83,6 @@ function updateTimestampFile(updates) {
   }
   const merged = { ...timestamp, ...updates };
   try {
-    fs.ensureDirSync(path.dirname(TIMESTAMP_FILE));
     fs.writeFileSync(TIMESTAMP_FILE, JSON.stringify(merged, null, 2));
   } catch (err) {
     console.error("Failed to write timestamp file:", err);
