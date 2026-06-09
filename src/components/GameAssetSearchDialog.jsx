@@ -189,7 +189,7 @@ export const GameAssetSearchDialog = ({
     searchDebounceRef.current = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const searchUrl = `https://api.ascendara.app/api/proxy/steamgriddb/search?term=${encodeURIComponent(query)}`;
+        const searchUrl = `https://api.ascendara.app/api/proxy/steamgrid/search/autocomplete/${encodeURIComponent(query)}`;
         const response = await fetch(searchUrl);
 
         if (!response.ok) {
@@ -220,15 +220,15 @@ export const GameAssetSearchDialog = ({
     // Fetch asset previews (grid, logo, hero)
     try {
       const assetTypes = [
-        { type: "grids", key: "grid" },
-        { type: "logos", key: "logo" },
-        { type: "heroes", key: "hero" },
+        { type: "grids", key: "grid", params: "?styles=alternate&dimensions=600x900" },
+        { type: "logos", key: "logo", params: "?styles=white&sort=score" },
+        { type: "heroes", key: "hero", params: "?styles=alternate" },
       ];
 
       const previews = {};
-      for (const { type, key } of assetTypes) {
+      for (const { type, key, params } of assetTypes) {
         try {
-          const url = `https://api.ascendara.app/api/proxy/steamgriddb/${type}/${game.id}`;
+          const url = `https://api.ascendara.app/api/proxy/steamgrid/${type}/game/${game.id}${params}`;
           const response = await fetch(url);
           if (response.ok) {
             const data = await response.json();
@@ -254,16 +254,16 @@ export const GameAssetSearchDialog = ({
     try {
       // Download all available assets
       const assetTypes = [
-        { type: "grids", key: "grid", filename: "grid.ascendara.jpg" },
-        { type: "logos", key: "logo", filename: "logo.ascendara.png" },
-        { type: "heroes", key: "hero", filename: "hero.ascendara.jpg" },
+        { type: "grids", key: "grid", filename: "grid.ascendara.jpg", params: "?styles=alternate&dimensions=600x900" },
+        { type: "logos", key: "logo", filename: "logo.ascendara.png", params: "?styles=white&sort=score" },
+        { type: "heroes", key: "hero", filename: "hero.ascendara.jpg", params: "?styles=alternate" },
       ];
 
       let downloadedCount = 0;
 
-      for (const { type, key, filename } of assetTypes) {
+      for (const { type, key, filename, params } of assetTypes) {
         try {
-          const url = `https://api.ascendara.app/api/proxy/steamgriddb/${type}/${selectedGame.id}`;
+          const url = `https://api.ascendara.app/api/proxy/steamgrid/${type}/game/${selectedGame.id}${params}`;
           const response = await fetch(url);
           
           if (response.ok) {

@@ -1552,7 +1552,23 @@
     "updateStarted": "Update download started!",
     "viewAll": "View All",
     "viewOnFling": "View on FLiNG",
-    "viewOnNexus": "View on Nexus Mods"
+    "viewOnNexus": "View on Nexus Mods",
+    "editGameInfo": "Edit Game Info",
+    "editGameInfoDescription": "Manually configure the Steam match and game assets for this game.",
+    "editAssets": "Edit Assets",
+    "currentlyMatched": "Currently Matched",
+    "searchSteam": "Search Steam",
+    "manualEntry": "Manual Entry",
+    "steamAppIdRequired": "Steam App ID is required",
+    "steamAppIdPlaceholder": "e.g., 1551360",
+    "manualAppIdHelp": "Enter the Steam App ID directly. You can find this in the Steam store URL.",
+    "clearMatch": "Clear Match",
+    "noSteamMatch": "No Steam Match",
+    "noSteamMatchDescription": "Link this game to a Steam store page for info, screenshots, and more.",
+    "setGameInfo": "Set Game Info",
+    "steamInfoUpdated": "Steam info updated successfully",
+    "steamInfoUpdateError": "Failed to update Steam info",
+    "steamDataNotFound": "Could not find Steam data for this App ID"
   },
   "globalSearch": {
     "categories": {

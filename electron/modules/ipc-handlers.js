@@ -1046,6 +1046,78 @@ function registerMiscHandlers() {
     }
   });
 
+  // Read game entry JSON
+  ipcMain.handle("read-game-entry", (_, game, isCustom) => {
+    const settings = settingsManager.getSettings();
+    try {
+      if (!settings.downloadDirectory) return { success: false, error: "Download directory not set" };
+
+      if (isCustom) {
+        const gamesFilePath = path.join(settings.downloadDirectory, "games.json");
+        if (!fs.existsSync(gamesFilePath)) return { success: false, error: "games.json not found" };
+        const gamesData = JSON.parse(fs.readFileSync(gamesFilePath, "utf8"));
+        const gameInfo = gamesData.games.find(g => g.game === game);
+        if (!gameInfo) return { success: false, error: "Game not found in games.json" };
+        return { success: true, data: gameInfo };
+      }
+
+      const allDirectories = [
+        settings.downloadDirectory,
+        ...(settings.additionalDirectories || []),
+      ];
+
+      for (const directory of allDirectories) {
+        const gameInfoPath = path.join(directory, game, `${game}.ascendara.json`);
+        if (fs.existsSync(gameInfoPath)) {
+          const gameInfo = JSON.parse(fs.readFileSync(gameInfoPath, "utf8"));
+          return { success: true, data: gameInfo, path: gameInfoPath };
+        }
+      }
+
+      return { success: false, error: "Game entry file not found" };
+    } catch (error) {
+      console.error("Error reading game entry:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Write game entry JSON
+  ipcMain.handle("write-game-entry", (_, game, updatedData, isCustom) => {
+    const settings = settingsManager.getSettings();
+    try {
+      if (!settings.downloadDirectory) return { success: false, error: "Download directory not set" };
+
+      if (isCustom) {
+        const gamesFilePath = path.join(settings.downloadDirectory, "games.json");
+        if (!fs.existsSync(gamesFilePath)) return { success: false, error: "games.json not found" };
+        const gamesData = JSON.parse(fs.readFileSync(gamesFilePath, "utf8"));
+        const idx = gamesData.games.findIndex(g => g.game === game);
+        if (idx === -1) return { success: false, error: "Game not found in games.json" };
+        gamesData.games[idx] = updatedData;
+        fs.writeFileSync(gamesFilePath, JSON.stringify(gamesData, null, 2));
+        return { success: true };
+      }
+
+      const allDirectories = [
+        settings.downloadDirectory,
+        ...(settings.additionalDirectories || []),
+      ];
+
+      for (const directory of allDirectories) {
+        const gameInfoPath = path.join(directory, game, `${game}.ascendara.json`);
+        if (fs.existsSync(gameInfoPath)) {
+          fs.writeFileSync(gameInfoPath, JSON.stringify(updatedData, null, 2));
+          return { success: true };
+        }
+      }
+
+      return { success: false, error: "Game entry file not found" };
+    } catch (error) {
+      console.error("Error writing game entry:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Local crack directory handlers
   ipcMain.handle("get-local-crack-directory", () => {
     const possiblePaths = [

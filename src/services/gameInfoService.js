@@ -64,6 +64,12 @@ const generateSearchVariations = title => {
     variations.push(normalized);
   }
 
+  // Try with all spaces removed (handles "forzahorizon6" vs "forza horizon 6")
+  const noSpaces = title.replace(/\s+/g, "");
+  if (noSpaces !== title) {
+    variations.push(noSpaces);
+  }
+
   // Remove duplicates while preserving order
   return [...new Set(variations)];
 };
@@ -174,6 +180,16 @@ const calculateSimilarity = (str1, str2) => {
   // Check if one string contains the other
   if (str1.includes(str2) || str2.includes(str1)) {
     return 0.8;
+  }
+
+  // Check if they match when spaces are removed (handles "forzahorizon6" vs "forza horizon 6")
+  const str1NoSpaces = str1.replace(/\s+/g, "");
+  const str2NoSpaces = str2.replace(/\s+/g, "");
+  if (str1NoSpaces === str2NoSpaces) {
+    return 0.9;
+  }
+  if (str1NoSpaces.includes(str2NoSpaces) || str2NoSpaces.includes(str1NoSpaces)) {
+    return 0.85;
   }
 
   // Simple word-based matching
@@ -749,6 +765,10 @@ export default {
 
   // Individual API functions
   getGameDetailsSteam,
+  getGameDetailByIdSteam,
+
+  // Data formatting
+  formatSteamData,
 
   // Helper functions
   formatImageUrl,

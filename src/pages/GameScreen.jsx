@@ -16,6 +16,7 @@ import {
   StopCircle,
   Loader,
   FileCheck2,
+  Check,
   FolderSync,
   AlertTriangle,
   Info,
@@ -25,6 +26,8 @@ import {
   Settings2,
   Download,
   FileSearch,
+  Search,
+  Edit3,
   ThumbsUp,
   Copy,
   Music2,
@@ -35,6 +38,7 @@ import {
   BookX,
   LockIcon,
   ImageUp,
+  ImageIcon,
   Bolt,
   Plus,
   GripVertical,
@@ -933,6 +937,251 @@ const EditGameEntryDialog = ({ open, onClose, gameName, isCustom, t, onSaved, is
   );
 };
 
+// Dialog to edit game info (Steam match and assets)
+const EditGameInfoDialog = ({ open, onClose, gameName, currentAppId, steamData, t, onSave, setAssetSearchOpen }) => {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedGame, setSelectedGame] = useState(null);
+  const [manualAppId, setManualAppId] = useState(currentAppId || "");
+  const [activeTab, setActiveTab] = useState("search"); // "search" or "manual"
+
+  // Reset state when dialog opens
+  useEffect(() => {
+    if (open) {
+      setSearchQuery(gameName || "");
+      setSearchResults([]);
+      setSelectedGame(null);
+      setManualAppId(currentAppId || "");
+      setActiveTab("search");
+    }
+  }, [open, gameName, currentAppId]);
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    try {
+      const searchUrl = `https://api.ascendara.app/api/proxy/steam/search?term=${encodeURIComponent(searchQuery)}`;
+      const response = await fetch(searchUrl);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.items) {
+          // Fetch details for first few results to show more info
+          const resultsWithDetails = await Promise.all(
+            data.items.slice(0, 5).map(async (item) => {
+              try {
+                const detailsUrl = `https://api.ascendara.app/api/proxy/steam/appdetails?appids=${item.id}`;
+                const detailsRes = await fetch(detailsUrl);
+                if (detailsRes.ok) {
+                  const detailsData = await detailsRes.json();
+                  const gameData = detailsData[item.id]?.data;
+                  return {
+                    ...item,
+                    header_image: gameData?.header_image,
+                    short_description: gameData?.short_description,
+                  };
+                }
+              } catch (e) {
+                console.warn("Could not fetch details for", item.name);
+              }
+              return item;
+            })
+          );
+          setSearchResults(resultsWithDetails);
+        }
+      }
+    } catch (error) {
+      console.error("Error searching Steam:", error);
+    }
+    setIsSearching(false);
+  };
+
+  const handleSelectGame = (game) => {
+    setSelectedGame(game);
+    setManualAppId(game.id.toString());
+  };
+
+  const handleSave = () => {
+    if (!manualAppId) {
+      toast.error(t("gameScreen.steamAppIdRequired"));
+      return;
+    }
+    onSave(manualAppId, selectedGame?.name || gameName);
+    onClose();
+  };
+
+  const handleClear = () => {
+    onSave(null, null); // Clear the steam app id
+    onClose();
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={onClose}>
+      <AlertDialogContent className="max-w-2xl">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-2xl font-bold text-foreground">
+            {t("gameScreen.editGameInfo")}
+          </AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-foreground">
+            {t("gameScreen.editGameInfoDescription")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="mt-4 space-y-4">
+          {/* Current match info */}
+          {steamData && (
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">{t("gameScreen.currentlyMatched")}</p>
+              <div className="mt-2 flex items-center gap-3">
+                {steamData.cover?.url && (
+                  <img
+                    src={steamData.cover.url}
+                    alt={steamData.name}
+                    className="h-16 w-32 rounded object-cover"
+                  />
+                )}
+                <div>
+                  <p className="font-semibold text-foreground">{steamData.name}</p>
+                  <p className="text-xs text-muted-foreground">App ID: {steamData.appid}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tabs */}
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant={activeTab === "search" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveTab("search")}
+              className={activeTab === "search" ? "bg-primary text-secondary" : "text-foreground"}
+            >
+              <Search className="mr-2 h-4 w-4" />
+              {t("gameScreen.searchSteam")}
+            </Button>
+            <Button
+              variant={activeTab === "manual" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveTab("manual")}
+              className={activeTab === "manual" ? "bg-primary text-secondary" : "text-foreground"}
+            >
+              <Edit3 className="mr-2 h-4 w-4" />
+              {t("gameScreen.manualEntry")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onClose();
+                setAssetSearchOpen(true);
+              }}
+              className="text-foreground"
+            >
+              <ImageUp className="mr-2 h-4 w-4" />
+              {t("gameScreen.editAssets")}
+            </Button>
+          </div>
+
+          {activeTab === "search" ? (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t("gameScreen.searchSteamPlaceholder")}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  className="text-foreground"
+                />
+                <Button
+                  onClick={handleSearch}
+                  disabled={isSearching || !searchQuery.trim()}
+                  className="bg-primary text-secondary"
+                >
+                  {isSearching ? (
+                    <Loader className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+
+              {/* Search Results */}
+              <div className="max-h-64 overflow-y-auto space-y-2">
+                {searchResults.map((game) => (
+                  <div
+                    key={game.id}
+                    onClick={() => handleSelectGame(game)}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-all",
+                      selectedGame?.id === game.id
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:border-primary/50"
+                    )}
+                  >
+                    {game.header_image ? (
+                      <img
+                        src={game.header_image}
+                        alt={game.name}
+                        className="h-12 w-24 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-24 items-center justify-center rounded bg-muted">
+                        <ImageIcon className="h-6 w-6 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground truncate">{game.name}</p>
+                      <p className="text-xs text-muted-foreground">App ID: {game.id}</p>
+                      {game.short_description && (
+                        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                          {game.short_description}
+                        </p>
+                      )}
+                    </div>
+                    {selectedGame?.id === game.id && (
+                      <Check className="h-5 w-5 text-primary" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <p className="text-sm text-muted-foreground mb-2">{t("gameScreen.manualAppIdHelp")}</p>
+                <Input
+                  value={manualAppId}
+                  className="text-foreground"
+                  onChange={(e) => setManualAppId(e.target.value)}
+                  placeholder={t("gameScreen.steamAppIdPlaceholder")}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <AlertDialogFooter className="mt-4 flex gap-2">
+          {currentAppId && (
+            <Button variant="outline" className="text-red-500" onClick={handleClear}>
+              {t("gameScreen.clearMatch")}
+            </Button>
+          )}
+          <Button variant="outline" className="text-primary" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            className="bg-primary text-secondary"
+            onClick={handleSave}
+            disabled={!manualAppId}
+          >
+            {t("common.save")}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
 export default function GameScreen() {
   const showError = (game, error) => {
     setErrorGame(game);
@@ -986,6 +1235,7 @@ export default function GameScreen() {
   const [errorMessage, setErrorMessage] = useState("");
   const [showExecutableManager, setShowExecutableManager] = useState(false);
   const [showEditGameEntry, setShowEditGameEntry] = useState(false);
+  const [showEditGameInfo, setShowEditGameInfo] = useState(false);
   const [showExecutableSelect, setShowExecutableSelect] = useState(false);
   const [availableExecutables, setAvailableExecutables] = useState([]);
   const [pendingLaunchOptions, setPendingLaunchOptions] = useState(null);
@@ -2043,6 +2293,73 @@ export default function GameScreen() {
     }
   };
 
+  // Handle saving edited Steam info
+  const handleEditSteamInfoSave = async (appId, gameName) => {
+    const currentGameName = game?.game || game?.name;
+    if (!currentGameName) return;
+
+    try {
+      // Read current game entry
+      const result = await window.electron.readGameEntry(currentGameName, game?.isCustom);
+      if (result.success) {
+        // Update steamAppId field
+        const updatedData = { ...result.data };
+        if (appId) {
+          updatedData.steamAppId = appId;
+        } else {
+          delete updatedData.steamAppId;
+        }
+
+        // Save updated entry
+        const saveResult = await window.electron.writeGameEntry(currentGameName, updatedData, game?.isCustom);
+        if (saveResult.success) {
+          toast.success(t("gameScreen.steamInfoUpdated"));
+          // Update local game state
+          setGame(prev => ({ ...prev, steamAppId: appId }));
+          // Clear current steam data and re-fetch
+          setSteamData(null);
+          if (appId) {
+            // Fetch new data by app ID
+            fetchSteamDataByAppId(appId);
+          }
+        } else {
+          toast.error(t("gameScreen.steamInfoUpdateError"));
+        }
+      }
+    } catch (error) {
+      console.error("Error saving Steam info:", error);
+      toast.error(t("gameScreen.steamInfoUpdateError"));
+    }
+  };
+
+  // Fetch Steam data by specific App ID
+  const fetchSteamDataByAppId = async appId => {
+    try {
+      setSteamLoading(true);
+      console.log("Fetching Steam data by App ID:", appId);
+
+      const gameDetails = await steamService.getGameDetailByIdSteam(appId);
+      if (gameDetails) {
+        const formattedData = steamService.formatSteamData(gameDetails);
+        if (formattedData.screenshots && formattedData.screenshots.length > 0) {
+          formattedData.formatted_screenshots = formattedData.screenshots.map(screenshot => ({
+            ...screenshot,
+            formatted_url: steamService.formatImageUrl(screenshot.url, "screenshot_huge"),
+          }));
+        }
+        console.log("Steam data fetched by App ID:", formattedData.appid);
+        setSteamData(formattedData);
+      } else {
+        console.log("No game data found for App ID:", appId);
+        toast.error(t("gameScreen.steamDataNotFound"));
+      }
+      setSteamLoading(false);
+    } catch (error) {
+      console.error("Error fetching Steam data by App ID:", error);
+      setSteamLoading(false);
+    }
+  };
+
   const handleResetPrefix = async () => {
     const gameName = game?.game || game?.name;
     if (!gameName) return;
@@ -2388,23 +2705,6 @@ export default function GameScreen() {
                       className="h-full w-full object-contain"
                     />
                   )}
-                  {/* Edit cover button */}
-                  <div className="absolute left-2 top-2 z-10">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-white hover:bg-white/20 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
-                      style={{ pointerEvents: "auto" }}
-                      title={t("library.editCoverImage")}
-                      tabIndex={0}
-                      onClick={e => {
-                        e.stopPropagation();
-                        setAssetSearchOpen(true);
-                      }}
-                    >
-                      <ImageUp className="h-5 w-5 fill-none text-white" />
-                    </Button>
-                  </div>
                   {isUninstalling && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                       <div className="w-full max-w-[200px] space-y-2 px-4">
@@ -3169,6 +3469,73 @@ export default function GameScreen() {
                     </Card>
                   )}
                 </div>
+
+                {/* Steam Match Info */}
+                {(steamData?.appid || game?.steamAppId) ? (
+                  <Card className="border border-border">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {steamData?.cover?.url ? (
+                            <img
+                              src={steamData.cover.url}
+                              alt={steamData.name}
+                              className="h-12 w-24 rounded object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-12 w-24 items-center justify-center rounded bg-muted">
+                              <ImageIcon className="h-6 w-6 text-muted-foreground" />
+                            </div>
+                          )}
+                          <div>
+                            <p className="text-sm font-medium text-foreground">
+                              {steamData?.name || game?.game || game?.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Steam App ID: {steamData?.appid || game?.steamAppId}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowEditGameInfo(true)}
+                        >
+                          <Edit3 className="mr-2 h-4 w-4" />
+                          {t("gameScreen.editGameInfo")}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : game?.isCustom && (
+                  <Card className="border border-dashed border-border bg-muted/30">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-12 w-24 items-center justify-center rounded bg-muted">
+                            <Search className="h-6 w-6 text-muted-foreground" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-foreground">
+                              {t("gameScreen.noSteamMatch")}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {t("gameScreen.noSteamMatchDescription")}
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowEditGameInfo(true)}
+                        >
+                          <Plus className="mr-2 h-4 w-4" />
+                          {t("gameScreen.setGameInfo")}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Game Summary */}
                 {(steamData?.about_the_game || steamData?.summary) && (
@@ -4552,6 +4919,18 @@ export default function GameScreen() {
         onSaved={updatedData => {
           setGame(prev => ({ ...prev, ...updatedData }));
         }}
+      />
+
+      {/* Edit Game Info Dialog */}
+      <EditGameInfoDialog
+        open={showEditGameInfo}
+        onClose={() => setShowEditGameInfo(false)}
+        gameName={game?.game || game?.name}
+        currentAppId={game?.steamAppId || steamData?.appid}
+        steamData={steamData}
+        t={t}
+        onSave={handleEditSteamInfoSave}
+        setAssetSearchOpen={setAssetSearchOpen}
       />
 
       {/* Launch Options Dialog */}

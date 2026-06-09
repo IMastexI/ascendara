@@ -2324,49 +2324,51 @@ const InstalledGameCard = memo(
         return;
       }
       try {
-        // Use SteamGridDB API proxy for game search
-        const searchUrl = `https://api.ascendara.app/api/proxy/steamgriddb/search?term=${encodeURIComponent(query)}`;
+        // Use SteamGridDB for proper grid covers (600x900 portrait)
+        const searchUrl = `https://api.ascendara.app/api/proxy/steamgrid/search/autocomplete/${encodeURIComponent(query)}`;
         const searchResponse = await fetch(searchUrl);
-        
+
         if (!searchResponse.ok) {
           throw new Error('SteamGridDB search failed');
         }
-        
+
         const searchData = await searchResponse.json();
-        
+
         if (searchData.success && searchData.data && searchData.data.length > 0) {
-          // Get grids for the first few results
+          // Get grid images for the first few results
           const results = [];
           const imageUrls = {};
-          
+
           for (const game of searchData.data.slice(0, 9)) {
             try {
-              // Fetch grid images for this game
-              const gridsUrl = `https://api.ascendara.app/api/proxy/steamgriddb/grids/${game.id}`;
+              // Fetch 600x900 grid images for this game
+              const gridsUrl = `https://api.ascendara.app/api/proxy/steamgrid/grids/game/${game.id}?styles=alternate&dimensions=600x900`;
               const gridsResponse = await fetch(gridsUrl);
-              
+
               if (gridsResponse.ok) {
                 const gridsData = await gridsResponse.json();
-                
+
                 if (gridsData.success && gridsData.data && gridsData.data.length > 0) {
                   // Use the first grid image
                   const firstGrid = gridsData.data[0];
-                  
+                  const gameId = game.id.toString();
+
                   results.push({
                     game: game.name,
-                    gameID: game.id.toString(),
-                    imgID: game.id.toString(),
+                    title: game.name,
+                    gameID: gameId,
+                    imgID: gameId,
                     img: firstGrid.url,
                   });
-                  
-                  imageUrls[game.id.toString()] = firstGrid.url;
+
+                  imageUrls[gameId] = firstGrid.url;
                 }
               }
             } catch (gridError) {
               console.warn(`Could not fetch grids for ${game.name}:`, gridError);
             }
           }
-          
+
           setCoverSearch(prev => ({ ...prev, isLoading: false, results: results }));
           setCoverImageUrls(imageUrls);
         } else {
@@ -2436,15 +2438,7 @@ const InstalledGameCard = memo(
                       )}
                     >
                       <img
-                        src={
-                          settings.usingLocalIndex &&
-                          cover.gameID &&
-                          coverImageUrls[cover.gameID]
-                            ? coverImageUrls[cover.gameID]
-                            : settings.usingLocalIndex && cover.gameID
-                              ? gameService.getImageUrlByGameId(cover.gameID)
-                              : gameService.getImageUrl(cover.imgID)
-                        }
+                        src={cover.img}
                         alt={cover.title}
                         className="h-full w-full object-cover"
                       />
@@ -2502,11 +2496,8 @@ const InstalledGameCard = memo(
                         dataUrl = `data:image/jpeg;base64,${imageData}`;
                       }
                     } else {
-                      // Fetch from API
-                      const imageUrl = gameService.getImageUrl(
-                        coverSearch.selectedCover.imgID
-                      );
-                      const response = await fetch(imageUrl);
+                      // Fetch from Steam CDN URL directly
+                      const response = await fetch(coverSearch.selectedCover.img);
                       const blob = await response.blob();
                       dataUrl = await new Promise(resolve => {
                         const reader = new FileReader();
@@ -3196,50 +3187,51 @@ const AddGameForm = ({ onSuccess }) => {
     searchDebounceRef.current = setTimeout(async () => {
       setCoverSearch(prev => ({ ...prev, isLoading: true }));
       try {
-        // Use SteamGridDB API proxy for game search
-        const searchUrl = `https://api.ascendara.app/api/proxy/steamgriddb/search?term=${encodeURIComponent(query)}`;
+        // Use SteamGridDB for proper grid covers (600x900 portrait)
+        const searchUrl = `https://api.ascendara.app/api/proxy/steamgrid/search/autocomplete/${encodeURIComponent(query)}`;
         const searchResponse = await fetch(searchUrl);
-        
+
         if (!searchResponse.ok) {
           throw new Error('SteamGridDB search failed');
         }
-        
+
         const searchData = await searchResponse.json();
-        
+
         if (searchData.success && searchData.data && searchData.data.length > 0) {
-          // Get grids for the first few results
+          // Get grid images for the first few results
           const results = [];
           const imageUrls = {};
-          
+
           for (const game of searchData.data.slice(0, 9)) {
             try {
-              // Fetch grid images for this game
-              const gridsUrl = `https://api.ascendara.app/api/proxy/steamgriddb/grids/${game.id}`;
+              // Fetch 600x900 grid images for this game
+              const gridsUrl = `https://api.ascendara.app/api/proxy/steamgrid/grids/game/${game.id}?styles=alternate&dimensions=600x900`;
               const gridsResponse = await fetch(gridsUrl);
-              
+
               if (gridsResponse.ok) {
                 const gridsData = await gridsResponse.json();
-                
+
                 if (gridsData.success && gridsData.data && gridsData.data.length > 0) {
                   // Use the first grid image
                   const firstGrid = gridsData.data[0];
-                  
+                  const gameId = game.id.toString();
+
                   results.push({
                     game: game.name,
-                    gameID: game.id.toString(),
-                    imgID: game.id.toString(),
+                    title: game.name,
+                    gameID: gameId,
+                    imgID: gameId,
                     img: firstGrid.url,
-                    steamAppId: game.id,
                   });
-                  
-                  imageUrls[game.id.toString()] = firstGrid.url;
+
+                  imageUrls[gameId] = firstGrid.url;
                 }
               }
             } catch (gridError) {
               console.warn(`Could not fetch grids for ${game.name}:`, gridError);
             }
           }
-          
+
           if (results.length > 0) {
             const firstResult = results[0];
             setCoverSearch(prev => ({
@@ -3252,8 +3244,8 @@ const AddGameForm = ({ onSuccess }) => {
             return;
           }
         }
-        
-        // If SteamGridDB returns no results, show empty state
+
+        // If no results found, show empty state
         setCoverSearch(prev => ({
           ...prev,
           results: [],
@@ -3263,11 +3255,11 @@ const AddGameForm = ({ onSuccess }) => {
         setCoverImageUrls({});
       } catch (error) {
         console.error("Error searching covers:", error);
-        setCoverSearch(prev => ({ 
-          ...prev, 
+        setCoverSearch(prev => ({
+          ...prev,
           results: [],
           selectedCover: null,
-          isLoading: false 
+          isLoading: false
         }));
         setCoverImageUrls({});
         toast.error(t("library.coverSearchError"));
@@ -3335,7 +3327,7 @@ const AddGameForm = ({ onSuccess }) => {
       }
 
       console.log("[AddGameForm] Adding game to library...");
-      // Pass the actual image URL from SteamGridDB
+      // Pass the actual image URL from SteamGridDB (600x900 grid)
       const coverImageUrl = coverSearch.selectedCover?.img;
       const result = await window.electron.addGame(
         formData.name,
@@ -3356,6 +3348,61 @@ const AddGameForm = ({ onSuccess }) => {
       }
 
       console.log("[AddGameForm] Game added successfully");
+
+      // Download all game assets (grid, logo, hero) if a cover was selected
+      if (coverSearch.selectedCover?.gameID) {
+        console.log("[AddGameForm] Downloading game assets...");
+        const assetTypes = [
+          { type: "grids", key: "grid", filename: "grid.ascendara.jpg", params: "?styles=alternate&dimensions=600x900" },
+          { type: "logos", key: "logo", filename: "logo.ascendara.png", params: "?styles=white&sort=score" },
+          { type: "heroes", key: "hero", filename: "hero.ascendara.jpg", params: "?styles=alternate" },
+        ];
+
+        let downloadedCount = 0;
+        for (const { type, filename, params } of assetTypes) {
+          try {
+            const url = `https://api.ascendara.app/api/proxy/steamgrid/${type}/game/${coverSearch.selectedCover.gameID}${params}`;
+            const response = await fetch(url);
+
+            if (response.ok) {
+              const data = await response.json();
+              if (data.success && data.data && data.data.length > 0) {
+                const assetUrl = data.data[0].url;
+
+                // Download the image
+                const imageResponse = await fetch(assetUrl);
+                const blob = await imageResponse.blob();
+
+                // Convert to base64
+                const reader = new FileReader();
+                const base64Promise = new Promise(resolve => {
+                  reader.onloadend = () => resolve(reader.result);
+                  reader.readAsDataURL(blob);
+                });
+
+                const dataUrl = await base64Promise;
+
+                // Save to game directory via IPC
+                await window.electron.saveGameAsset(formData.name, filename, dataUrl);
+                downloadedCount++;
+
+                // If this is the grid image, notify library card via event
+                if (type === "grids") {
+                  window.dispatchEvent(
+                    new CustomEvent("game-cover-updated", {
+                      detail: { gameName: formData.name, dataUrl },
+                    })
+                  );
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`[AddGameForm] Failed to download ${type}:`, e);
+          }
+        }
+        console.log(`[AddGameForm] Downloaded ${downloadedCount} assets`);
+      }
+
       toast.success(t("library.addGame.success"));
       setIsSubmitting(false);
       onSuccess();
@@ -3621,15 +3668,7 @@ const AddGameForm = ({ onSuccess }) => {
                   )}
                 >
                   <img
-                    src={
-                      settings.usingLocalIndex &&
-                      cover.gameID &&
-                      coverImageUrls[cover.gameID]
-                        ? coverImageUrls[cover.gameID]
-                        : settings.usingLocalIndex && cover.gameID
-                          ? gameService.getImageUrlByGameId(cover.gameID)
-                          : gameService.getImageUrl(cover.imgID)
-                    }
+                    src={cover.img}
                     alt={cover.title}
                     className="h-full w-full object-cover"
                   />
@@ -3650,17 +3689,7 @@ const AddGameForm = ({ onSuccess }) => {
             <div className="mt-4 flex justify-center">
               <div className="relative aspect-video w-64 overflow-hidden rounded-lg border-2 border-primary">
                 <img
-                  src={
-                    settings.usingLocalIndex &&
-                    coverSearch.selectedCover.gameID &&
-                    coverImageUrls[coverSearch.selectedCover.gameID]
-                      ? coverImageUrls[coverSearch.selectedCover.gameID]
-                      : settings.usingLocalIndex && coverSearch.selectedCover.gameID
-                        ? gameService.getImageUrlByGameId(
-                            coverSearch.selectedCover.gameID
-                          )
-                        : gameService.getImageUrl(coverSearch.selectedCover.imgID)
-                  }
+                  src={coverSearch.selectedCover.img}
                   alt={coverSearch.selectedCover.title}
                   className="h-full w-full object-cover"
                 />
