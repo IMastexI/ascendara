@@ -391,8 +391,24 @@ class ChunkedDownloader:
             return os.path.getsize(self.dest_path)
         return 0
     
+    def _check_for_stop(self) -> bool:
+        """Check if download has been stopped by reading the JSON file."""
+        try:
+            if os.path.exists(self.game_info_path):
+                with open(self.game_info_path, 'r') as f:
+                    current_game_info = json.load(f)
+                    return current_game_info.get('downloadingData', {}).get('stopped', False)
+        except Exception as e:
+            logging.warning(f"[ChunkedDownloader] Error checking stop state: {e}")
+        return False
+
     def _update_progress(self, force: bool = False):
         """Update progress in game info file."""
+        # Check if download has been stopped
+        if self._check_for_stop():
+            logging.info("[ChunkedDownloader] Download stopped by user")
+            raise InterruptedError("Download stopped by user")
+        
         now = time.time()
         if not force and (now - self.last_progress_update) < self.PROGRESS_UPDATE_INTERVAL:
             return
@@ -597,6 +613,9 @@ class ChunkedDownloader:
             logging.error(f"[ChunkedDownloader] Max retries ({self.MAX_RETRIES}) exceeded")
             return False
             
+        except InterruptedError as e:
+            logging.info(f"[ChunkedDownloader] Download interrupted: {e}")
+            return False
         except Exception as e:
             logging.error(f"[ChunkedDownloader] Download failed: {e}")
             raise
@@ -1074,8 +1093,24 @@ class AscendaraDownloader:
         else:
             raise Exception("Buzzheavier download failed after all retries")
     
+    def _check_for_stop(self) -> bool:
+        """Check if download has been stopped by reading the JSON file."""
+        try:
+            if os.path.exists(self.game_info_path):
+                with open(self.game_info_path, 'r') as f:
+                    current_game_info = json.load(f)
+                    return current_game_info.get('downloadingData', {}).get('stopped', False)
+        except Exception as e:
+            logging.warning(f"[AscendaraDownloader] Error checking stop state: {e}")
+        return False
+
     def _extract_files(self, archive_path: Optional[str] = None):
         """Extract archive files and flatten nested directories."""
+        # Check if download has been stopped before starting extraction
+        if self._check_for_stop():
+            logging.info("[AscendaraDownloader] Extraction stopped by user")
+            return
+        
         # Create backup before extraction if this is an update
         backup_dir = self._create_update_backup()
         
@@ -1159,6 +1194,11 @@ class AscendaraDownloader:
         extraction_errors = []
         
         while archives_to_process:
+            # Check if download has been stopped
+            if self._check_for_stop():
+                logging.info("[AscendaraDownloader] Extraction stopped by user")
+                return
+            
             current_archive = archives_to_process.pop(0)
             
             if current_archive in processed_archives:
@@ -1956,6 +1996,11 @@ class AscendaraDownloader:
             watching_path: Path to the filemap JSON
             backup_dir: Path to backup directory (for updates)
         """
+        # Check if download has been stopped before starting verification
+        if self._check_for_stop():
+            logging.info("[AscendaraDownloader] Verification stopped by user")
+            return
+        
         logging.info(f"[AscendaraDownloader] Starting verification of extracted files")
         verify_start_time = time.time()
         try:
@@ -1989,6 +2034,11 @@ class AscendaraDownloader:
             
             verified_count = 0
             for file_path, file_info in watching_data.items():
+                # Check if download has been stopped during verification
+                if self._check_for_stop():
+                    logging.info("[AscendaraDownloader] Verification stopped by user")
+                    return
+                
                 if os.path.basename(file_path) == 'filemap.ascendara.json':
                     continue
                 

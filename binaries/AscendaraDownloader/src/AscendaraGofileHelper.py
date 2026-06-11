@@ -528,6 +528,10 @@ class GofileDownloader:
                     f"Successfully {'updated' if self.updateFlow else 'downloaded'} {self.game_info['game']}"
                 )
                 
+        except InterruptedError as e:
+            logging.info(f"[AscendaraGofileHelper] Download interrupted: {e}")
+            # Don't mark as error - just stop cleanly
+            return
         except Exception as e:
             logging.error(f"[AscendaraGofileHelper] Error during download process: {str(e)}")
             logging.error(f"Error during download process: {str(e)}")
@@ -785,6 +789,11 @@ class GofileDownloader:
                         final_progress = 100
                     self._update_progress(file_info["filename"], final_progress, 0, 0, done=True)
                     return
+            except InterruptedError as e:
+                logging.info(f"[AscendaraGofileHelper] Download interrupted: {e}")
+                if os.path.exists(tmp_file):
+                    os.remove(tmp_file)
+                raise
             except (requests.exceptions.RequestException, IOError) as e:
                 logging.error(f"[AscendaraGofileHelper] Error downloading {url}: {str(e)}")
                 if retry < self._max_retries - 1:
@@ -797,7 +806,23 @@ class GofileDownloader:
 
         raise Exception(f"Failed to download {url} after {self._max_retries} retries")
 
+    def _check_for_stop(self) -> bool:
+        """Check if download has been stopped by reading the JSON file."""
+        try:
+            if os.path.exists(self.game_info_path):
+                with open(self.game_info_path, 'r') as f:
+                    current_game_info = json.load(f)
+                    return current_game_info.get('downloadingData', {}).get('stopped', False)
+        except Exception as e:
+            logging.warning(f"[AscendaraGofileHelper] Error checking stop state: {e}")
+        return False
+
     def _update_progress(self, filename, progress, rate, eta_seconds=0, done=False):
+        # Check if download has been stopped
+        if self._check_for_stop():
+            logging.info("[AscendaraGofileHelper] Download stopped by user")
+            raise InterruptedError("Download stopped by user")
+        
         with self._lock:
             self.game_info["downloadingData"]["downloading"] = not done
             self.game_info["downloadingData"]["progressCompleted"] = f"{progress:.2f}"
@@ -1065,6 +1090,11 @@ class GofileDownloader:
                 logging.warning(f"[AscendaraGofileHelper] Could not cleanup backup: {e}")
     
     def _extract_files(self):
+        # Check if download has been stopped before starting extraction
+        if self._check_for_stop():
+            logging.info("[AscendaraGofileHelper] Extraction stopped by user")
+            return
+        
         # Create backup before extraction if this is an update
         backup_dir = self._create_update_backup()
         self._backup_dir = backup_dir  # Store for verification phase
