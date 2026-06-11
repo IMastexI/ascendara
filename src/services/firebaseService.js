@@ -1817,24 +1817,32 @@ export const searchUsers = async searchQuery => {
     }
 
     const usersRef = collection(db, "users");
-    const queryLower = searchQuery.toLowerCase();
+    const queryLower = searchQuery.toLowerCase().trim();
     
-    // Use WHERE clause to filter at database level (requires displayName index)
-    // Note: This requires a Firestore single-field index on users.displayName
     const q = query(
       usersRef,
-      where("displayName", ">=", queryLower),
-      where("displayName", "<=", queryLower + "\uf8ff")
+      where("displayName", ">=", queryLower[0]), // First character prefix
+      where("displayName", "<=", queryLower[0] + "\uf8ff"),
+      limit(100) // Cap results for performance
     );
     const snapshot = await getDocs(q);
 
     const users = [];
 
-    // Collect matching user IDs first
+    // Collect matching user IDs first - only include users with active Ascend or verified/owner/contributor status
+    // Client-side filtering for contains matching (more intuitive than prefix-only)
     const matchingUsers = [];
     snapshot.forEach(doc => {
       const data = doc.data();
-      if (doc.id !== currentUser.uid) {
+      const displayName = (data.displayName || "").toLowerCase();
+      // Match if displayName contains the query (not just starts with) and has access
+      const nameMatches = displayName.includes(queryLower);
+      const ascendSub = data.ascendSubscription;
+      const hasActiveAscend = ascendSub?.active === true;
+      const isVerified = data.verified === true || data.owner === true || data.contributor === true;
+      const hasAccess = hasActiveAscend || isVerified;
+      
+      if (doc.id !== currentUser.uid && nameMatches && hasAccess) {
         matchingUsers.push({ uid: doc.id, data });
       }
     });

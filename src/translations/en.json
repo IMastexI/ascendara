@@ -618,7 +618,7 @@
     },
     "search": {
       "hint": "Search for users by their display name to view their profile, add them as friends, or start a conversation.",
-      "noResults": "No users found matching your search. Try a different name.",
+      "noResults": "No active Ascend users found matching your search. Try a different name or check back later.",
       "noResultsTitle": "No users found",
       "placeholder": "Search by display name...",
       "resultsCount": "{{count}} users found",
