@@ -100,6 +100,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useSettings } from "@/context/SettingsContext";
 import { verifyAscendAccess } from "@/services/firebaseService";
+import ProtonOptionsDialog from "@/components/ProtonOptionsDialog";
 
 const themes = [
   // Light themes
@@ -311,16 +312,22 @@ function Settings() {
   const [controllerConnected, setControllerConnected] = useState(false);
   const [runners, setRunners] = useState([]);
   const [selectedRunner, setSelectedRunner] = useState("auto");
-  const [isDownloadingProton, setIsDownloadingProton] = useState(false);
+  const [isDownloadingProtonCachy, setIsDownloadingProtonCachy] = useState(false);
+  const [protonCachyInfo, setProtonCachyInfo] = useState(null);
+  const [showProtonCachyConfirm, setShowProtonCachyConfirm] = useState(false);
+  const [protonCachyUpdateStatus, setProtonCachyUpdateStatus] = useState(null); // null | "checking" | "up-to-date" | "update-available"
+
+  const [isDownloadingProtonGE, setIsDownloadingProtonGE] = useState(false);
   const [protonGEInfo, setProtonGEInfo] = useState(null);
-  const [showProtonConfirm, setShowProtonConfirm] = useState(false);
-  const [protonUpdateStatus, setProtonUpdateStatus] = useState(null); // null | "checking" | "up-to-date" | "update-available"
+  const [showProtonGEConfirm, setShowProtonGEConfirm] = useState(false);
+  const [protonGEUpdateStatus, setProtonGEUpdateStatus] = useState(null);
   const [umuInstalled, setUmuInstalled] = useState(false);
   const [umuProtonInfo, setUmuProtonInfo] = useState(null);
   const [isDownloadingUmuLauncher, setIsDownloadingUmuLauncher] = useState(false);
   const [isDownloadingUmuProton, setIsDownloadingUmuProton] = useState(false);
   const [umuProtonUpdateStatus, setUmuProtonUpdateStatus] = useState(null);
   const [latestDevCommit, setLatestDevCommit] = useState(null);
+  const [protonOptionsOpen, setProtonOptionsOpen] = useState(false);
   // Default custom colors for merging with saved themes (handles missing new properties)
   const defaultCustomColors = {
     background: "255 255 255",
@@ -2831,6 +2838,33 @@ function Settings() {
                           </option>
                         ))}
                       </select>
+
+                      {(() => {
+                        let activeRunnerName = "";
+                        if (selectedRunner === "auto") {
+                          activeRunnerName = runners[0]?.name?.toLowerCase() || "";
+                        } else {
+                          activeRunnerName = (selectedRunner.split("/").pop() || "").toLowerCase();
+                        }
+                        const runnerType = activeRunnerName.includes("cachyos")
+                          ? "cachyos"
+                          : activeRunnerName.includes("ge-proton") || activeRunnerName.includes("proton-ge")
+                            ? "ge"
+                            : null;
+
+                        if (!runnerType) return null;
+
+                        return (
+                          <Button
+                            size="sm"
+                            className="gap-2 text-secondary"
+                            onClick={() => setProtonOptionsOpen(true)}
+                          >
+                            <SquareTerminal className="h-4 w-4" />
+                            {t("settings.linuxCompat.viewProtonOptions")}
+                          </Button>
+                        );
+                      })()}
                     </div>
 
                     {/* Detected Runners List */}
@@ -2868,13 +2902,13 @@ function Settings() {
 
                     {/* Action Buttons */}
                     <div className="flex flex-wrap gap-3">
-                      {/* Download / Update Proton-GE */}
+                      {/* Download / Update Proton-CachyOS */}
                       <Button
                         onClick={async () => {
                           try {
-                            const info = await window.electron.getProtonGEInfo();
+                            const info = await window.electron.getProtonCachyOSInfo();
                             if (!info.success) {
-                              console.error("Failed to get Proton-GE info:", info.error);
+                              console.error("Failed to get Proton-CachyOS info:", info.error);
                               return;
                             }
                             if (info.alreadyInstalled) {
@@ -2882,16 +2916,16 @@ function Settings() {
                               setRunners(updated);
                               return;
                             }
-                            setProtonGEInfo(info);
-                            setShowProtonConfirm(true);
+                            setProtonCachyInfo(info);
+                            setShowProtonCachyConfirm(true);
                           } catch (e) {
-                            console.error("Failed to get Proton-GE info:", e);
+                            console.error("Failed to get Proton-CachyOS info:", e);
                           }
                         }}
-                        disabled={isDownloadingProton}
+                        disabled={isDownloadingProtonCachy}
                         className="gap-2 text-secondary"
                       >
-                        {isDownloadingProton ? (
+                        {isDownloadingProtonCachy ? (
                           <>
                             <Loader className="h-4 w-4 animate-spin" />
                             {t("settings.linuxCompat.downloading")}
@@ -2899,41 +2933,41 @@ function Settings() {
                         ) : (
                           <>
                             <Download className="h-4 w-4" />
-                            {runners.some(r => r.name.toLowerCase().includes("ge-proton"))
-                              ? t("settings.linuxCompat.updateProtonGE")
-                              : t("settings.linuxCompat.downloadProtonGE")}
+                            {runners.some(r => r.name.toLowerCase().includes("cachyos"))
+                              ? t("settings.linuxCompat.updateProtonCachy")
+                              : t("settings.linuxCompat.downloadProtonCachy")}
                           </>
                         )}
                       </Button>
 
-                      {/* Check for Updates */}
+                      {/* Check for Updates (CachyOS) */}
                       <Button
                         variant="outline"
                         onClick={async () => {
-                          setProtonUpdateStatus("checking");
+                          setProtonCachyUpdateStatus("checking");
                           try {
-                            const info = await window.electron.checkProtonGEUpdate();
+                            const info = await window.electron.checkProtonCachyOSUpdate();
                             if (!info.success) {
-                              setProtonUpdateStatus(null);
+                              setProtonCachyUpdateStatus(null);
                               return;
                             }
                             if (info.alreadyInstalled) {
-                              setProtonUpdateStatus("up-to-date");
+                              setProtonCachyUpdateStatus("up-to-date");
                             } else if (info.updateAvailable) {
-                              setProtonUpdateStatus("update-available");
-                              setProtonGEInfo(info);
+                              setProtonCachyUpdateStatus("update-available");
+                              setProtonCachyInfo(info);
                             } else {
-                              setProtonUpdateStatus(null);
+                              setProtonCachyUpdateStatus(null);
                             }
                           } catch (e) {
                             console.error("Failed to check for updates:", e);
-                            setProtonUpdateStatus(null);
+                            setProtonCachyUpdateStatus(null);
                           }
                         }}
-                        disabled={protonUpdateStatus === "checking"}
+                        disabled={protonCachyUpdateStatus === "checking"}
                         className="gap-2"
                       >
-                        {protonUpdateStatus === "checking" ? (
+                        {protonCachyUpdateStatus === "checking" ? (
                           <>
                             <Loader className="h-4 w-4 animate-spin" />
                             {t("settings.linuxCompat.checking")}
@@ -2945,44 +2979,10 @@ function Settings() {
                           </>
                         )}
                       </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={async () => {
-                          const result = await window.electron.selectCustomRunner();
-                          if (result.success) {
-                            setSelectedRunner(result.path);
-                            await window.electron.updateSetting(
-                              "linuxRunner",
-                              result.path
-                            );
-                            const updated = await window.electron.getRunners();
-                            setRunners(updated);
-                          } else if (result.error) {
-                            console.error("Custom runner error:", result.error);
-                          }
-                        }}
-                        className="gap-2"
-                      >
-                        <FolderOpen className="h-4 w-4" />
-                        {t("settings.linuxCompat.selectCustomRunner")}
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={async () => {
-                          const updated = await window.electron.getRunners();
-                          setRunners(updated);
-                        }}
-                        className="gap-2"
-                      >
-                        <FolderSync className="h-4 w-4" />
-                        {t("settings.linuxCompat.refresh")}
-                      </Button>
                     </div>
 
                     {/* Update Status Message */}
-                    {protonUpdateStatus === "up-to-date" && (
+                    {protonCachyUpdateStatus === "up-to-date" && (
                       <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 p-3">
                         <FileCheck2 className="h-4 w-4 text-green-500" />
                         <p className="text-sm text-green-500">
@@ -2991,19 +2991,19 @@ function Settings() {
                       </div>
                     )}
 
-                    {protonUpdateStatus === "update-available" && protonGEInfo && (
+                    {protonCachyUpdateStatus === "update-available" && protonCachyInfo && (
                       <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
                         <div className="flex items-center gap-2">
                           <AlertTriangle className="h-4 w-4 text-yellow-500" />
                           <p className="text-sm text-yellow-500">
                             {t("settings.linuxCompat.updateAvailable", {
-                              version: protonGEInfo.latestVersion,
+                              version: protonCachyInfo.latestVersion,
                             })}
-                            {protonGEInfo.installedVersions.length > 0 && (
+                            {protonCachyInfo.installedVersions.length > 0 && (
                               <span className="text-yellow-500/70">
                                 {" "}
                                 {t("settings.linuxCompat.updateAvailableCurrent", {
-                                  version: protonGEInfo.installedVersions[0],
+                                  version: protonCachyInfo.installedVersions[0],
                                 })}
                               </span>
                             )}
@@ -3011,7 +3011,7 @@ function Settings() {
                         </div>
                         <Button
                           size="sm"
-                          onClick={() => setShowProtonConfirm(true)}
+                          onClick={() => setShowProtonCachyConfirm(true)}
                           className="gap-1"
                         >
                           <Download className="h-3 w-3" />
@@ -3019,6 +3019,129 @@ function Settings() {
                         </Button>
                       </div>
                     )}
+
+                    {/* Advanced options: Proton-GE alternative */}
+                    <details className="group rounded-lg border border-border bg-muted/30">
+                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-foreground">
+                        {t("settings.linuxCompat.advancedOptions")}
+                        <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
+                      </summary>
+                      <div className="flex flex-wrap items-center gap-3 border-t border-border p-4">
+                        <p className="w-full text-xs text-muted-foreground">
+                          {t("settings.linuxCompat.protonGEAltDescription")}
+                        </p>
+
+                        {/* Download / Update Proton-GE */}
+                        <Button
+                          onClick={async () => {
+                            try {
+                              const info = await window.electron.getProtonGEInfo();
+                              if (!info.success) {
+                                console.error("Failed to get Proton-GE info:", info.error);
+                                return;
+                              }
+                              if (info.alreadyInstalled) {
+                                const updated = await window.electron.getRunners();
+                                setRunners(updated);
+                                return;
+                              }
+                              setProtonGEInfo(info);
+                              setShowProtonGEConfirm(true);
+                            } catch (e) {
+                              console.error("Failed to get Proton-GE info:", e);
+                            }
+                          }}
+                          disabled={isDownloadingProtonGE}
+                          className="gap-2 text-secondary"
+                        >
+                          {isDownloadingProtonGE ? (
+                            <>
+                              <Loader className="h-4 w-4 animate-spin" />
+                              {t("settings.linuxCompat.downloading")}
+                            </>
+                          ) : (
+                            <>
+                              <Download className="h-4 w-4" />
+                              {runners.some(r => r.name.toLowerCase().includes("ge-proton"))
+                                ? t("settings.linuxCompat.updateProtonGE")
+                                : t("settings.linuxCompat.downloadProtonGE")}
+                            </>
+                          )}
+                        </Button>
+
+                        {/* Check for Updates (GE) */}
+                        <Button
+                          variant="outline"
+                          onClick={async () => {
+                            setProtonGEUpdateStatus("checking");
+                            try {
+                              const info = await window.electron.checkProtonGEUpdate();
+                              if (!info.success) {
+                                setProtonGEUpdateStatus(null);
+                                return;
+                              }
+                              if (info.alreadyInstalled) {
+                                setProtonGEUpdateStatus("up-to-date");
+                              } else if (info.updateAvailable) {
+                                setProtonGEUpdateStatus("update-available");
+                                setProtonGEInfo(info);
+                              } else {
+                                setProtonGEUpdateStatus(null);
+                              }
+                            } catch (e) {
+                              console.error("Failed to check for GE updates:", e);
+                              setProtonGEUpdateStatus(null);
+                            }
+                          }}
+                          disabled={protonGEUpdateStatus === "checking"}
+                          className="gap-2"
+                        >
+                          {protonGEUpdateStatus === "checking" ? (
+                            <>
+                              <Loader className="h-4 w-4 animate-spin" />
+                              {t("settings.linuxCompat.checking")}
+                            </>
+                          ) : (
+                            <>
+                              <FolderSync className="h-4 w-4" />
+                              {t("settings.linuxCompat.checkForUpdates")}
+                            </>
+                          )}
+                        </Button>
+
+                        {protonGEUpdateStatus === "up-to-date" && (
+                          <div className="flex w-full items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 p-3">
+                            <FileCheck2 className="h-4 w-4 text-green-500" />
+                            <p className="text-sm text-green-500">{t("settings.linuxCompat.upToDate")}</p>
+                          </div>
+                        )}
+
+                        {protonGEUpdateStatus === "update-available" && protonGEInfo && (
+                          <div className="flex w-full items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                              <p className="text-sm text-yellow-500">
+                                {t("settings.linuxCompat.updateAvailable", {
+                                  version: protonGEInfo.latestVersion,
+                                })}
+                                {protonGEInfo.installedVersions.length > 0 && (
+                                  <span className="text-yellow-500/70">
+                                    {" "}
+                                    {t("settings.linuxCompat.updateAvailableCurrent", {
+                                      version: protonGEInfo.installedVersions[0],
+                                    })}
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                            <Button size="sm" onClick={() => setShowProtonGEConfirm(true)} className="gap-1">
+                              <Download className="h-3 w-3" />
+                              {t("settings.linuxCompat.update")}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </details>
 
                     {/* Info Box */}
                     <div className="rounded-lg border border-border bg-muted/50 p-3">
@@ -3201,12 +3324,28 @@ function Settings() {
                     )}
                   </div>
                 </Card>
+
+                <ProtonOptionsDialog
+                  open={protonOptionsOpen}
+                  onOpenChange={setProtonOptionsOpen}
+                  runnerType={
+                    (() => {
+                      let name = selectedRunner === "auto"
+                        ? (runners[0]?.name?.toLowerCase() || "")
+                        : (selectedRunner.split("/").pop() || "").toLowerCase();
+                      if (name.includes("cachyos")) return "cachyos";
+                      if (name.includes("ge-proton") || name.includes("proton-ge")) return "ge";
+                      return null;
+                    })()
+                  }
+                />
+
                 {/* Proton-GE Download Confirmation Dialog */}
                 <AlertDialog
-                  open={showProtonConfirm && !!protonGEInfo}
+                  open={showProtonGEConfirm && !!protonGEInfo}
                   onOpenChange={open => {
                     if (!open) {
-                      setShowProtonConfirm(false);
+                      setShowProtonGEConfirm(false);
                       setProtonGEInfo(null);
                     }
                   }}
@@ -3276,7 +3415,7 @@ function Settings() {
                     <AlertDialogFooter>
                       <AlertDialogCancel
                         onClick={() => {
-                          setShowProtonConfirm(false);
+                          setShowProtonGEConfirm(false);
                           setProtonGEInfo(null);
                         }}
                       >
@@ -3284,9 +3423,9 @@ function Settings() {
                       </AlertDialogCancel>
                       <AlertDialogAction
                         onClick={async () => {
-                          setShowProtonConfirm(false);
-                          setProtonUpdateStatus(null);
-                          setIsDownloadingProton(true);
+                          setShowProtonGEConfirm(false);
+                          setProtonGEUpdateStatus(null);
+                          setIsDownloadingProtonGE(true);
                           try {
                             const result = await window.electron.downloadProtonGE();
                             if (result.success) {
@@ -3299,7 +3438,7 @@ function Settings() {
                           } catch (e) {
                             console.error("Failed to download Proton-GE:", e);
                           }
-                          setIsDownloadingProton(false);
+                          setIsDownloadingProtonGE(false);
                           setProtonGEInfo(null);
                         }}
                         className="gap-2"
@@ -3311,6 +3450,107 @@ function Settings() {
                             })
                           : t("settings.linuxCompat.protonConfirm.downloadBtn", {
                               size: protonGEInfo?.sizeFormatted,
+                            })}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+
+                {/* Proton-CachyOS Download Confirmation Dialog */}
+                <AlertDialog
+                  open={showProtonCachyConfirm && !!protonCachyInfo}
+                  onOpenChange={open => {
+                    if (!open) {
+                      setShowProtonCachyConfirm(false);
+                      setProtonCachyInfo(null);
+                    }
+                  }}
+                >
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {protonCachyInfo?.updateAvailable
+                          ? t("settings.linuxCompat.protonConfirm.titleUpdateCachy")
+                          : t("settings.linuxCompat.protonConfirm.titleDownloadCachy")}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription className="space-y-3">
+                        <p>
+                          {protonCachyInfo?.updateAvailable ? (
+                            <>
+                              {t("settings.linuxCompat.protonConfirm.updateAvailablePrefixCachy")}{" "}
+                              <strong className="text-foreground">{protonCachyInfo.name}</strong>
+                              {protonCachyInfo.installedVersions?.length > 0 && (
+                                <span>
+                                  {" "}
+                                  {t("settings.linuxCompat.protonConfirm.replacing", {
+                                    versions: protonCachyInfo.installedVersions.join(", "),
+                                  })}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {t("settings.linuxCompat.protonConfirm.aboutToDownloadPrefix")}{" "}
+                              <strong className="text-foreground">{protonCachyInfo?.name}</strong>.
+                            </>
+                          )}
+                        </p>
+                        <p>
+                          {t("settings.linuxCompat.protonConfirm.file")}{" "}
+                          <code className="rounded bg-muted px-1 text-xs">{protonCachyInfo?.fileName}</code>
+                        </p>
+                        <p>
+                          {t("settings.linuxCompat.protonConfirm.size")}{" "}
+                          <strong className="text-foreground">{protonCachyInfo?.sizeFormatted}</strong>{" "}
+                          {protonCachyInfo &&
+                            t("settings.linuxCompat.protonConfirm.sizeApprox", {
+                              gb: (protonCachyInfo.size / (1024 * 1024 * 1024)).toFixed(1),
+                            })}
+                        </p>
+                        <p>
+                          {t("settings.linuxCompat.protonConfirm.descriptionCachy")}{" "}
+                          <code className="rounded bg-muted px-1 text-xs">~/.ascendara/runners/</code>
+                        </p>
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel
+                        onClick={() => {
+                          setShowProtonCachyConfirm(false);
+                          setProtonCachyInfo(null);
+                        }}
+                      >
+                        {t("settings.linuxCompat.protonConfirm.cancel")}
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={async () => {
+                          setShowProtonCachyConfirm(false);
+                          setProtonCachyUpdateStatus(null);
+                          setIsDownloadingProtonCachy(true);
+                          try {
+                            const result = await window.electron.downloadProtonCachyOS();
+                            if (result.success) {
+                              const updated = await window.electron.getRunners();
+                              setRunners(updated);
+                              if (result.path) {
+                                setSelectedRunner(result.path);
+                              }
+                            }
+                          } catch (e) {
+                            console.error("Failed to download Proton-CachyOS:", e);
+                          }
+                          setIsDownloadingProtonCachy(false);
+                          setProtonCachyInfo(null);
+                        }}
+                        className="gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        {protonCachyInfo?.updateAvailable
+                          ? t("settings.linuxCompat.protonConfirm.updateBtn", {
+                              size: protonCachyInfo?.sizeFormatted,
+                            })
+                          : t("settings.linuxCompat.protonConfirm.downloadBtn", {
+                              size: protonCachyInfo?.sizeFormatted,
                             })}
                       </AlertDialogAction>
                     </AlertDialogFooter>
