@@ -31,47 +31,50 @@ const FolderCard = ({ name, onClick, className, refreshKey }) => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
-    // Get folder contents
     const folder = getFolderByName(name);
-    if (folder && folder.items) {
-      setFolderGames(folder.items);
+    if (!folder?.items) return;
 
-      // Load thumbnails for up to 6 games in the folder
-      const thumbnails = [];
-      for (let i = 0; i < Math.min(folder.items.length, 6); i++) {
-        const game = folder.items[i];
+    setFolderGames(folder.items);
+
+    // Load up to 4 portrait thumbnails via IPC (same as InstalledGameCard)
+    const loadThumbnails = async () => {
+      const results = [];
+      for (const game of folder.items.slice(0, 4)) {
         const gameId = game.game || game.name;
-        const localStorageKey = `game-cover-${gameId}`;
-        const cachedImage = localStorage.getItem(localStorageKey);
-        if (cachedImage) {
-          thumbnails.push({
-            id: gameId,
-            image: cachedImage,
-            name: gameId,
-          });
+        try {
+          const base64 = await window.electron.getGameImage(gameId, "grid");
+          if (base64) {
+            results.push({ id: gameId, image: `data:image/jpeg;base64,${base64}`, name: gameId });
+          } else {
+            results.push({ id: gameId, image: null, name: gameId });
+          }
+        } catch {
+          results.push({ id: gameId, image: null, name: gameId });
         }
       }
-      setGameThumbnails(thumbnails);
-    }
+      setGameThumbnails(results);
+    };
+
+    loadThumbnails();
   }, [name, refreshKey]);
 
   const handleFolderClick = e => {
     e.stopPropagation();
-    // If an onClick handler was provided, use it
     if (onClick) {
       onClick();
     } else {
-      // Otherwise navigate to the folder view page
       navigate(`/folderview/${encodeURIComponent(name)}`);
     }
   };
+
+  const slots = Array(4).fill(null).map((_, i) => gameThumbnails[i] ?? null);
 
   return (
     <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
       <Card
         className={cn(
-          "group relative overflow-hidden rounded-xl border border-border bg-card shadow-lg transition-all duration-200",
-          "hover:-translate-y-1 hover:shadow-xl",
+          "group relative overflow-hidden rounded-xl border border-border bg-card shadow-md transition-all duration-200",
+          "hover:-translate-y-1 hover:shadow-xl hover:border-primary/30",
           "cursor-pointer",
           className
         )}
@@ -79,105 +82,65 @@ const FolderCard = ({ name, onClick, className, refreshKey }) => {
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        <CardContent className="flex-1 p-0">
-          <div className="relative aspect-[6/5] overflow-hidden border-b border-border bg-gradient-to-b from-secondary/10 to-secondary/20">
-            {/* Folder icon and name */}
-            <div className="absolute left-0 right-0 top-0 z-10 flex items-center justify-between bg-gradient-to-b from-black/30 to-transparent p-3">
-              <div className="flex items-center gap-2">
-                {isHovered ? (
-                  <FolderOpen className="h-5 w-5 text-primary transition-transform duration-300" />
-                ) : (
-                  <Folder className="h-5 w-5 text-primary transition-transform duration-300" />
-                )}
-                <h3 className="text-base font-semibold text-foreground">{name}</h3>
-              </div>
-              <div className="flex items-center">
-                <span
-                  className={cn(
-                    "rounded-full bg-secondary/50 px-2 py-0.5 text-xs text-foreground transition-all duration-300",
-                    isHovered ? "mr-2" : "mr-0"
-                  )}
-                >
-                  {folderGames.length}{" "}
-                  {folderGames.length === 1
-                    ? t("library.gamesInFolder")
-                    : t("library.gamesInFolder")}
-                </span>
-                {/* Remove folder button with fade transition */}
-                <button
-                  type="button"
-                  className={cn(
-                    "hover:bg-destructive/20 rounded p-1 transition-all duration-300",
-                    isHovered
-                      ? "ml-0 opacity-100"
-                      : "pointer-events-none ml-[-30px] opacity-0"
-                  )}
-                  title={t("library.removeFolder")}
-                  onClick={e => {
-                    e.stopPropagation();
-                    setShowDeleteDialog(true);
-                  }}
-                >
-                  <Trash2 className="h-5 w-5 text-primary" />
-                </button>
-              </div>
-            </div>
-
-            {/* Game thumbnails grid */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="grid h-full w-full grid-cols-3 grid-rows-2 gap-1 p-3 pt-14">
-                {gameThumbnails.map((game, index) => (
-                  <div
-                    key={game.id}
-                    className="aspect-[4/3] overflow-hidden rounded-md border border-border shadow-sm"
-                    style={{ transform: `rotate(${index % 2 === 0 ? "-" : ""}1deg)` }}
-                  >
+        <CardContent className="p-0">
+          <div className="relative aspect-[2/3] overflow-hidden bg-muted/20">
+            {/* 2×2 portrait thumbnail grid */}
+            <div className="grid h-full w-full grid-cols-2 grid-rows-2 gap-0.5 p-0.5">
+              {slots.map((slot, index) => (
+                slot?.image ? (
+                  <div key={slot.id} className="overflow-hidden">
                     <img
-                      src={game.image}
-                      alt={game.name}
+                      src={slot.image}
+                      alt={slot.name}
                       className="h-full w-full object-cover"
                     />
                   </div>
-                ))}
-
-                {/* Empty placeholder thumbnails if less than 6 games */}
-                {gameThumbnails.length < 6 &&
-                  Array(6 - gameThumbnails.length)
-                    .fill(0)
-                    .map((_, index) => (
-                      <div
-                        key={`empty-${index}`}
-                        className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md border border-border bg-secondary/10"
-                        style={{
-                          transform: `rotate(${(index + gameThumbnails.length) % 2 === 0 ? "-" : ""}1deg)`,
-                        }}
-                      >
-                        <div className="p-1 text-center text-xs text-muted-foreground">
-                          {t("library.empty")}
-                        </div>
-                      </div>
-                    ))}
-              </div>
+                ) : (
+                  <div
+                    key={`empty-${index}`}
+                    className="flex items-center justify-center bg-muted/40"
+                  >
+                    <Folder className="h-5 w-5 text-muted-foreground/30" />
+                  </div>
+                )
+              ))}
             </div>
 
             {/* Hover overlay */}
-            <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/10"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+
+            {/* Delete button — top-right on hover */}
+            <button
+              type="button"
+              className={cn(
+                "absolute right-2 top-2 z-20 rounded-full bg-black/50 p-1.5 text-white transition-opacity hover:bg-destructive/80",
+                isHovered ? "opacity-100" : "pointer-events-none opacity-0"
+              )}
+              title={t("library.removeFolder")}
+              onClick={e => {
+                e.stopPropagation();
+                setShowDeleteDialog(true);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+
+            {/* Game count badge — top-left */}
+            <span className="absolute left-2 top-2 z-20 flex items-center gap-1 rounded bg-black/50 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+              {isHovered ? <FolderOpen className="h-3 w-3" /> : <Folder className="h-3 w-3" />}
+              {folderGames.length}
+            </span>
           </div>
         </CardContent>
-        <CardFooter className="flex items-center justify-between p-5">
-          <div className="text-sm text-muted-foreground">
+        <CardFooter className="flex flex-col items-start gap-1 px-3 py-2">
+          <h3 className="w-full truncate text-sm font-semibold leading-tight text-foreground">
+            {name}
+          </h3>
+          <p className="text-xs text-muted-foreground">
             {folderGames.length === 0
               ? t("library.dragGamesHere")
-              : t("library.clickToOpenFolder")}
-          </div>
-          <div
-            className={cn(
-              "text-xs font-medium text-primary transition-opacity duration-300",
-              isHovered ? "opacity-100" : "pointer-events-none opacity-0"
-            )}
-          >
-            {t("library.openFolder")}
-          </div>
+              : `${folderGames.length} ${t("library.gamesInFolder")}`}
+          </p>
         </CardFooter>
       </Card>
       {/* Remove Folder Alert Dialog */}

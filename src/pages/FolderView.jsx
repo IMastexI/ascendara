@@ -32,8 +32,111 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Create a global image cache outside the component to persist across renders
+// Module-level image cache — persists across renders
 const imageCache = {};
+
+// Defined outside FolderView so it never gets recreated on parent re-render,
+// which was causing the cleanup `cancelled = true` to fire before IPC resolved.
+const GameCard = React.memo(({ game, favorites, onPlay, onRemove, onToggleFavorite, t }) => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [imageData, setImageData] = useState(() => imageCache[game.game || game.name] ?? null);
+  const gameId = game.game || game.name;
+  const isFavorite = favorites.includes(gameId);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (imageCache[gameId]) {
+      setImageData(imageCache[gameId]);
+      return;
+    }
+    (async () => {
+      try {
+        const base64 = await window.electron.getGameImage(gameId, "grid");
+        if (!cancelled && base64) {
+          const dataUrl = `data:image/jpeg;base64,${base64}`;
+          imageCache[gameId] = dataUrl;
+          setImageData(dataUrl);
+        }
+      } catch {
+        // no image available
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gameId]);
+
+  return (
+    <Card
+      className={cn(
+        "group relative overflow-hidden rounded-xl border border-border bg-card shadow-md transition-all duration-200",
+        "hover:-translate-y-1 hover:shadow-xl hover:border-primary/30",
+        "cursor-pointer"
+      )}
+      onClick={e => {
+        if (e.target.closest("button")) return;
+        onPlay(game);
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <CardContent className="p-0">
+        <div className="relative aspect-[2/3] overflow-hidden">
+          {imageData ? (
+            <img
+              src={imageData}
+              alt={gameId}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-muted">
+              <Gamepad2 className="h-12 w-12 text-muted-foreground/30" />
+            </div>
+          )}
+          <div className={cn(
+            "absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/80 via-black/20 to-transparent p-3 transition-opacity duration-200",
+            isHovered ? "opacity-100" : "opacity-0"
+          )}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                {game.online && <Gamepad2 className="h-3.5 w-3.5 text-white/70" />}
+                {game.dlc && <Gift className="h-3.5 w-3.5 text-white/70" />}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  className="rounded-full bg-black/40 p-1.5 text-white hover:bg-black/60"
+                  title={t("library.removeFromFolder")}
+                  onClick={e => { e.stopPropagation(); onRemove(gameId); }}
+                >
+                  <FolderUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  className="rounded-full bg-black/40 p-1.5 text-white hover:bg-black/60"
+                  title={isFavorite ? t("library.removeFavorite") : t("library.addFavorite")}
+                  onClick={e => { e.stopPropagation(); onToggleFavorite(gameId); }}
+                >
+                  <Heart className={cn("h-3.5 w-3.5", isFavorite ? "fill-primary text-primary" : "fill-none text-white")} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+      <CardFooter className="flex flex-col items-start gap-1 px-3 py-2">
+        <h3 className="w-full truncate text-sm font-semibold leading-tight text-foreground">
+          {gameId}
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          {game.playTime !== undefined
+            ? game.playTime < 60
+              ? t("library.lessThanMinute")
+              : game.playTime < 3600
+                ? `${Math.floor(game.playTime / 60)}m`
+                : `${Math.floor(game.playTime / 3600)}h`
+            : t("library.neverPlayed")}
+        </p>
+      </CardFooter>
+    </Card>
+  );
+});
 
 const FolderView = () => {
   const { folderName } = useParams();
@@ -321,179 +424,64 @@ const FolderView = () => {
     }
   };
 
-  // Use React.memo to prevent unnecessary re-renders of GameCard
-  const GameCard = React.memo(({ game }) => {
-    const [isHovered, setIsHovered] = useState(false);
-    const gameId = game.game || game.name;
-    const isFavorite = favorites.includes(gameId);
-
-    // Use ref for image data to prevent re-renders
-    const imageDataRef = useRef("");
-
-    // Initialize with cached image if available
-    if (!imageDataRef.current) {
-      // First check our in-memory cache
-      if (imageCache[gameId]) {
-        imageDataRef.current = imageCache[gameId];
-      } else {
-        // Then check localStorage
-        const localStorageKey = `game-cover-${gameId}`;
-        const cachedImage = localStorage.getItem(localStorageKey);
-        if (cachedImage) {
-          imageCache[gameId] = cachedImage; // Store in memory cache
-          imageDataRef.current = cachedImage;
-        } else {
-          // Use a default image
-          imageCache[gameId] = "/placeholder-game.jpg";
-          imageDataRef.current = "/placeholder-game.jpg";
-        }
-      }
-    }
-
-    return (
-      <Card
-        className={cn(
-          "group relative overflow-hidden rounded-xl border border-border bg-card shadow-lg transition-all duration-200",
-          "hover:-translate-y-1 hover:shadow-xl",
-          "cursor-pointer"
-        )}
-        onClick={e => {
-          // Only navigate if not clicking on action buttons
-          if (e.target.closest("button")) return;
-          handlePlayGame(game);
-        }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-      >
-        <CardContent className="p-0">
-          <div className="relative aspect-[4/3] overflow-hidden">
-            <img
-              src={imageDataRef.current}
-              alt={game.game}
-              className="h-full w-full border-b border-border object-cover transition-transform duration-300 group-hover:scale-105"
-              loading="eager"
-            />
-            {typeof game.launchCount === "undefined" && !game.isCustom && (
-              <span className="pointer-events-none absolute left-2 top-2 z-20 select-none rounded bg-secondary px-2 py-0.5 text-xs font-bold text-primary">
-                {t("library.newBadge")}
-              </span>
-            )}
-            {/* Floating action bar for buttons */}
-            <div className="absolute bottom-3 right-3 z-10 flex gap-2 rounded-lg bg-black/60 p-2 opacity-90 shadow-md transition-opacity hover:opacity-100">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-white hover:bg-white/20 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
-                title={t("library.removeFromFolder")}
-                tabIndex={0}
-                onClick={e => {
-                  e.stopPropagation();
-                  handleRemoveFromFolder(game.game || game.name);
-                }}
-              >
-                <FolderUp className="h-6 w-6 text-white" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-white hover:bg-white/20 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
-                title={
-                  isFavorite ? t("library.removeFavorite") : t("library.addFavorite")
-                }
-                tabIndex={0}
-                onClick={e => {
-                  e.stopPropagation();
-                  toggleFavorite(game.game || game.name);
-                }}
-              >
-                <Heart
-                  className={cn(
-                    "h-6 w-6",
-                    isFavorite ? "fill-primary text-primary" : "fill-none text-white"
-                  )}
-                />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-        <CardFooter className="flex flex-col items-start gap-2 p-4 pt-3">
-          <div className="flex w-full items-center gap-2">
-            <h3 className="flex-1 truncate text-lg font-semibold text-foreground">
-              {game.game}
-            </h3>
-            {game.online && <Gamepad2 className="h-4 w-4 text-muted-foreground" />}
-            {game.dlc && <Gift className="h-4 w-4 text-muted-foreground" />}
-          </div>
-          <p className="line-clamp-2 w-full text-sm text-muted-foreground">
-            {game.playTime !== undefined ? (
-              <span className="font-medium md:text-xs">
-                {game.playTime < 60
-                  ? t("library.lessThanMinute")
-                  : game.playTime < 120
-                    ? `1 ${t("library.minute")} ${t("library.ofPlaytime")}`
-                    : game.playTime < 3600
-                      ? `${Math.floor(game.playTime / 60)} ${t("library.minutes")} ${t("library.ofPlaytime")}`
-                      : game.playTime < 7200
-                        ? `1 ${t("library.hour")} ${t("library.ofPlaytime")}`
-                        : `${Math.floor(game.playTime / 3600)} ${t("library.hours")} ${t("library.ofPlaytime")}`}
-              </span>
-            ) : (
-              <span className="font-medium md:text-xs">{t("library.neverPlayed")}</span>
-            )}
-          </p>
-        </CardFooter>
-      </Card>
-    );
-  });
-
-  // Preload images for all games in the folder
-  useEffect(() => {
-    folderGames.forEach(game => {
-      const gameId = game.game || game.name;
-      if (!imageCache[gameId]) {
-        const localStorageKey = `game-cover-${gameId}`;
-        const cachedImage = localStorage.getItem(localStorageKey);
-        if (cachedImage) {
-          imageCache[gameId] = cachedImage;
-        } else {
-          imageCache[gameId] = "/placeholder-game.jpg";
-        }
-      }
-    });
-  }, [folderGames]);
+  const decodedName = decodeURIComponent(lastFolderNameRef.current || "");
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="mb-4 mt-8 flex items-center justify-between">
-        <Button variant="ghost" onClick={() => navigate("/library")}>
-          <ChevronLeft className="mr-2 h-4 w-4" />
-          {t("common.back")}
-        </Button>
+    <div className="fixed inset-0 top-[60px] flex overflow-hidden bg-background">
 
-        <Button variant="none" size="sm" onClick={() => setShowDeleteDialog(true)}>
-          {t("library.deleteFolder")}
-        </Button>
-      </div>
-
-      <div className="mb-6 flex items-center">
-        <h1 className="mr-2 text-2xl font-bold">
-          {decodeURIComponent(lastFolderNameRef.current || "")}
-        </h1>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => {
-            setNewFolderName(decodeURIComponent(lastFolderNameRef.current || ""));
-            setRenameError("");
-            setShowRenameDialog(true);
-          }}
+      {/* ── Sidebar ── */}
+      <aside className="flex w-60 shrink-0 flex-col border-r border-border/60">
+        <button
+          className="flex items-center gap-3 border-b border-border/60 px-4 pb-3 pt-3 transition-colors hover:bg-accent/50"
+          onClick={() => navigate("/library")}
         >
-          <Pencil className="mb-2 h-4 w-4" />
-        </Button>
-      </div>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 ring-1 ring-primary/30">
+            <ChevronLeft className="h-4 w-4 text-primary" />
+          </span>
+          <div className="min-w-0 flex-1 text-left">
+            <p className="truncate text-sm font-semibold leading-none text-foreground">{t("common.back")}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("library.backToLibrary")}</p>
+          </div>
+        </button>
 
-      {/* Rename Folder Dialog */}
+        <div className="px-4 pt-4">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Folder</p>
+          <div className="flex items-center gap-2">
+            <Folder className="h-4 w-4 shrink-0 text-primary" />
+            <p className="flex-1 truncate text-sm font-semibold text-foreground">{decodedName}</p>
+            <button
+              className="shrink-0 rounded p-1 hover:bg-accent"
+              onClick={() => {
+                setNewFolderName(decodedName);
+                setRenameError("");
+                setShowRenameDialog(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {folderGames.length} {t("library.gamesInFolder")}
+          </p>
+        </div>
+
+        <div className="flex-1" />
+
+        <div className="px-4 pb-4">
+          <button
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-destructive/80 transition-colors hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setShowDeleteDialog(true)}
+          >
+            <Folder className="h-4 w-4" />
+            {t("library.deleteFolder")}
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Main content ── */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+
+      {/* Rename Folder Dialog — renders as portal, position in tree doesn't matter */}
       <AlertDialog open={showRenameDialog} onOpenChange={setShowRenameDialog}>
         <AlertDialogContent className="border-border bg-background">
           <AlertDialogHeader>
@@ -607,41 +595,39 @@ const FolderView = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {(() => {
-        // Always use lastFolderGamesRef as fallback to prevent empty state
-        const gamesToShow =
-          folderGames.length > 0 ? folderGames : lastFolderGamesRef.current;
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {(() => {
+            const gamesToShow =
+              folderGames.length > 0 ? folderGames : lastFolderGamesRef.current;
 
-        // Only show empty state when we're sure the folder is actually empty
-        // and not just in a loading state
-        if (gamesToShow.length === 0 && !isLoading) {
-          return (
-            <div className="mt-8 flex flex-col items-center justify-center text-center">
-              <Folder className="mb-4 h-16 w-16 text-primary" />
-              <h2 className="mb-2 text-2xl font-bold">{t("library.emptyFolderTitle")}</h2>
-              <p className="mb-4 text-muted-foreground">
-                {t("library.emptyFolderDescription")}
-              </p>
-              <Button
-                variant="default"
-                className="gap-2 text-secondary"
-                onClick={() => navigate("/library")}
-              >
-                <ChevronLeft className="h-4 w-4" />
-                {t("library.backToLibrary")}
-              </Button>
-            </div>
-          );
-        }
+            if (gamesToShow.length === 0 && !isLoading) {
+              return (
+                <div className="mt-16 flex flex-col items-center justify-center text-center">
+                  <Folder className="mb-4 h-16 w-16 text-primary" />
+                  <h2 className="mb-2 text-2xl font-bold">{t("library.emptyFolderTitle")}</h2>
+                  <p className="mb-4 text-muted-foreground">{t("library.emptyFolderDescription")}</p>
+                </div>
+              );
+            }
 
-        return (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {gamesToShow.map(game => (
-              <GameCard key={game.game || game.name} game={game} />
-            ))}
-          </div>
-        );
-      })()}
+            return (
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {gamesToShow.map(game => (
+                  <GameCard
+                  key={game.game || game.name}
+                  game={game}
+                  favorites={favorites}
+                  onPlay={handlePlayGame}
+                  onRemove={handleRemoveFromFolder}
+                  onToggleFavorite={toggleFavorite}
+                  t={t}
+                />
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      </div>
     </div>
   );
 };

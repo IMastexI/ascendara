@@ -83,6 +83,7 @@ import {
   syncCloudLibrary,
   syncGameAchievements,
   verifyAscendAccess,
+  getFriendsList,
 } from "@/services/firebaseService";
 import { calculateLibraryValue } from "@/services/cheapsharkService";
 
@@ -182,16 +183,20 @@ const Library = () => {
   });
   const [isCalculatingValue, setIsCalculatingValue] = useState(false);
   const [valueProgress, setValueProgress] = useState({ current: 0, total: 0, game: "" });
+  const [activeTab, setActiveTab] = useState("all"); // "all" | "favorites" | "cloud" | "playLater"
   const { t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, userData } = useAuth();
   const { settings } = useSettings();
   const [ascendAccess, setAscendAccess] = useState({
     hasAccess: false,
     isSubscribed: false,
     isVerified: false,
   });
+  const [showAscendPanel, setShowAscendPanel] = useState(false);
+  const [friends, setFriends] = useState([]);
+  const [friendsLoaded, setFriendsLoaded] = useState(false);
 
   useEffect(() => {
     safeSetItem("game-favorites", JSON.stringify(favorites));
@@ -1059,616 +1064,210 @@ const Library = () => {
 
   if (loading) {
     return (
-      <div className="container mx-auto">
-        <div className="mx-auto flex min-h-[85vh] max-w-md flex-col items-center justify-center text-center">
-          <div className="space-y-6">
-            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-            <div className="space-y-2">
-              <h3 className="text-2xl font-semibold tracking-tight">
-                {t("library.loadingLibrary")}
-              </h3>
-              <p className="text-base leading-relaxed text-muted-foreground">
-                {t("library.loadingLibraryMessage")}
-              </p>
-            </div>
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          <div className="space-y-1">
+            <h3 className="text-xl font-semibold tracking-tight">{t("library.loadingLibrary")}</h3>
+            <p className="text-sm text-muted-foreground">{t("library.loadingLibraryMessage")}</p>
           </div>
         </div>
       </div>
     );
   }
 
+  const tabGames = activeTab === "favorites"
+    ? filteredGames.filter(g => !g.isFolder && favorites.includes(g.game || g.name))
+    : filteredGames;
+
+  const tabTotalPages = Math.ceil(tabGames.length / PAGE_SIZE);
+  const tabPaginatedGames = tabGames.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const sidebarTabs = [
+    {
+      id: "all",
+      label: t("library.pageTitle") || "Library",
+      icon: <SquareLibrary className="h-4 w-4" />,
+      count: games.filter(g => !g.isFolder).length + getGamesInFolders().length,
+    },
+    {
+      id: "favorites",
+      label: t("library.filters.favorites") || "Favorites",
+      icon: <Heart className="h-4 w-4" />,
+      count: favorites.length,
+    },
+    {
+      id: "cloud",
+      label: t("library.cloudOnly.title") || "Cloud Library",
+      icon: <Cloud className="h-4 w-4" />,
+      count: cloudOnlyGames.length,
+      hidden: !user,
+    },
+    {
+      id: "playLater",
+      label: t("library.playLater.title") || "Play Later",
+      icon: <Clock className="h-4 w-4" />,
+      count: playLaterGames.length,
+    },
+  ].filter(tab => !tab.hidden);
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto max-w-7xl p-4 md:p-8">
-        {error && (
-          <div className="bg-destructive/10 text-destructive mb-4 rounded-lg p-4">
-            {error}
-          </div>
-        )}
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-col">
-            <div className="flex flex-row items-start justify-between">
-              {/* Left side: Title and Search */}
-              <div className="flex-1">
-                <div className="mb-2 mt-6 flex items-center">
-                  <h1 className="text-4xl font-bold tracking-tight text-primary">
-                    {t("library.pageTitle")}
-                  </h1>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="mb-2 ml-2 flex h-6 w-6 cursor-help items-center justify-center rounded-full bg-muted hover:bg-muted/80">
-                          <span className="text-sm font-medium">?</span>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent
-                        side="bottom"
-                        className="space-y-2 p-4 text-secondary"
-                      >
-                        <p className="font-semibold">{t("library.iconLegend.header")}</p>
-                        <Separator />
-                        <div className="flex items-center gap-2">
-                          <Gamepad2 className="h-4 w-4" />{" "}
-                          <span>{t("library.iconLegend.onlineFix")}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Gift className="h-4 w-4" />{" "}
-                          <span>{t("library.iconLegend.allDlcs")}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <svg
-                            className="h-4 w-4 text-secondary"
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                          >
-                            <path
-                              d="M2 10C2 8.89543 2.89543 8 4 8H20C21.1046 8 22 8.89543 22 10V17C22 18.1046 21.1046 19 20 19H16.1324C15.4299 19 14.7788 18.6314 14.4174 18.029L12.8575 15.4292C12.4691 14.7818 11.5309 14.7818 11.1425 15.4292L9.58261 18.029C9.22116 18.6314 8.57014 19 7.86762 19H4C2.89543 19 2 18.1046 2 17V10Z"
-                              stroke="currentColor"
-                              strokeWidth={2}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                            <path
-                              d="M3.81253 6.7812C4.5544 5.6684 5.80332 5 7.14074 5H16.8593C18.1967 5 19.4456 5.6684 20.1875 6.7812L21 8H3L3.81253 6.7812Z"
-                              stroke="currentColor"
-                              strokeWidth={2}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>{" "}
-                          <span>{t("library.iconLegend.vrGame")}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <PackageOpen className="h-4 w-4" />{" "}
-                          <span>{t("library.iconLegend.size")}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Tag className="h-4 w-4" />{" "}
-                          <span>{t("library.iconLegend.version")}</span>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
+    <div className="fixed inset-0 top-[60px] flex overflow-hidden bg-background">
+      {/* ── Left Sidebar ─────────────────────────────────────────── */}
+      <aside className="flex w-60 shrink-0 flex-col border-r border-border/60">
 
-                {/* Library Value Button */}
-                <button
-                  onClick={() => handleCalculateLibraryValue()}
-                  className="mb-4 flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-1.5 text-sm text-primary transition-colors hover:bg-primary/20"
-                >
-                  <DollarSign className="h-4 w-4" />
-                  {libraryValueData && !libraryHasChanged() ? (
-                    <span>${libraryValueData.totalValue.toFixed(2)}</span>
-                  ) : (
-                    <span>
-                      {t("library.libraryValue.calculate") || "Calculate Library Value"}
-                    </span>
-                  )}
-                </button>
-
-                <div className="relative mr-12 flex items-center gap-2">
-                  <SearchIcon className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder={t("library.searchLibrary")}
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                  <div className="ml-2 flex items-center gap-1">
-                    <TooltipProvider>
-                      <DropdownMenu
-                        open={isDropdownOpen}
-                        onOpenChange={setIsDropdownOpen}
-                      >
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            className="rounded p-2 hover:bg-secondary/50"
-                            type="button"
-                          >
-                            <SortAscIcon className="h-5 w-5" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem
-                            onClick={() => setSortOrder("asc")}
-                            className={cn(
-                              "cursor-pointer",
-                              sortOrder === "asc" && "bg-accent/50"
-                            )}
-                          >
-                            <ArrowUpAZ className="mr-2 h-4 w-4" />
-                            {t("library.sort.aToZ")}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => setSortOrder("desc")}
-                            className={cn(
-                              "cursor-pointer",
-                              sortOrder === "desc" && "bg-accent/50"
-                            )}
-                          >
-                            <ArrowDownAZ className="mr-2 h-4 w-4" />
-                            {t("library.sort.zToA")}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuCheckboxItem
-                            className="cursor-pointer"
-                            checked={filters.favorites}
-                            onCheckedChange={checked =>
-                              setFilters(prev => ({ ...prev, favorites: checked }))
-                            }
-                          >
-                            <Heart className="mr-2 h-4 w-4" />
-                            {t("library.filters.favorites")}
-                          </DropdownMenuCheckboxItem>
-                          <DropdownMenuCheckboxItem
-                            checked={filters.vrOnly}
-                            onCheckedChange={checked =>
-                              setFilters(prev => ({ ...prev, vrOnly: checked }))
-                            }
-                            className="cursor-pointer"
-                          >
-                            <svg
-                              className="mr-2 h-4 w-4"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              xmlns="http://www.w3.org/2000/svg"
-                            >
-                              <path
-                                d="M2 10C2 8.89543 2.89543 8 4 8H20C21.1046 8 22 8.89543 22 10V17C22 18.1046 21.1046 19 20 19H16.1324C15.4299 19 14.7788 18.6314 14.4174 18.029L12.8575 15.4292C12.4691 14.7818 11.5309 14.7818 11.1425 15.4292L9.58261 18.029C9.22116 18.6314 8.57014 19 7.86762 19H4C2.89543 19 2 18.1046 2 17V10Z"
-                                stroke="currentColor"
-                                strokeWidth={1.3}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                              <path
-                                d="M3.81253 6.7812C4.5544 5.6684 5.80332 5 7.14074 5H16.8593C18.1967 5 19.4456 5.6684 20.1875 6.7812L21 8H3L3.81253 6.7812Z"
-                                stroke="currentColor"
-                                strokeWidth={1.3}
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                            {t("library.filters.vrGames")}
-                          </DropdownMenuCheckboxItem>
-                          <DropdownMenuCheckboxItem
-                            checked={filters.onlineGames}
-                            onCheckedChange={checked =>
-                              setFilters(prev => ({ ...prev, onlineGames: checked }))
-                            }
-                            className="cursor-pointer"
-                          >
-                            <ExternalLink className="mr-2 h-4 w-4" />
-                            {t("library.filters.onlineGames")}
-                          </DropdownMenuCheckboxItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            className={cn(
-                              "rounded p-2 hover:bg-secondary/50",
-                              selectionMode && "bg-primary/10 text-primary"
-                            )}
-                            type="button"
-                            aria-label={t("library.multiselect")}
-                            onClick={() => {
-                              setSelectionMode(prev => !prev);
-                              setSelectedGames([]);
-                            }}
-                          >
-                            <CheckSquareIcon className="h-5 w-5" />
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent className="text-secondary">
-                          {t("library.multiselect")}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                    <button
-                      className={cn("rounded p-2 hover:bg-secondary/50")}
-                      type="button"
-                      aria-label={t("library.newFolder")}
-                      onClick={() => setIsNewFolderOpen(true)}
-                    >
-                      <FolderPlus className="h-5 w-5" />
-                    </button>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            className={cn(
-                              "rounded p-2 hover:bg-secondary/50",
-                              isSyncingLibrary && "cursor-not-allowed opacity-50"
-                            )}
-                            type="button"
-                            aria-label={t("library.cloudSync") || "Cloud Sync"}
-                            onClick={handleCloudSync}
-                            disabled={isSyncingLibrary}
-                          >
-                            {isSyncingLibrary ? (
-                              <Loader className="h-5 w-5 animate-spin" />
-                            ) : (
-                              <CloudUpload className="h-5 w-5" />
-                            )}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent className="text-secondary">
-                          {user
-                            ? t("library.cloudSync") || "Cloud Sync"
-                            : t("library.signInToSync") || "Sign in to sync"}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                    <NewFolderDialog
-                      open={isNewFolderOpen}
-                      onOpenChange={setIsNewFolderOpen}
-                      onCreate={handleCreateFolder}
-                    />
-                  </div>
-                </div>
-
-                {/* Bulk Remove Bar (only in selection mode) */}
-                {selectionMode && (
-                  <div className="mb-4 mt-2 flex items-center justify-between rounded-md bg-secondary/30 p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-primary">
-                        {t("library.tools.selected", { count: selectedGames.length })}
-                      </span>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="destructive"
-                        disabled={selectedGames.length === 0}
-                        onClick={handleBulkRemove}
-                      >
-                        {t("library.tools.bulkRemove")}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setSelectionMode(false);
-                          setSelectedGames([]);
-                        }}
-                      >
-                        {t("common.cancel")}
-                      </Button>
-                    </div>
-                  </div>
-                )}
+        {/* ── User profile strip ── */}
+        <div className="border-b border-border/60">
+          <div className="flex items-center gap-3 px-4 pb-3 pt-3">
+            <button
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-lg transition-colors hover:opacity-80"
+              onClick={() => navigate("/profile")}
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 ring-1 ring-primary/30">
+                {userData?.photoURL
+                  ? <img src={userData.photoURL} className="h-8 w-8 rounded-full object-cover" alt="" />
+                  : <User className="h-3.5 w-3.5 text-primary" />
+                }
               </div>
+              <div className="min-w-0 flex-1 text-left">
+                <p className="truncate text-sm font-semibold leading-none text-foreground">{username || "Guest"}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {games.filter(g => !g.isFolder).length + getGamesInFolders().length}{" "}
+                  {t("library.gamesInLibrary") || "games"}
+                </p>
+              </div>
+            </button>
+            {ascendAccess.hasAccess && (
+              <button
+                title={showAscendPanel ? "Hide Ascend" : "Show Ascend"}
+                onClick={async () => {
+                  const next = !showAscendPanel;
+                  setShowAscendPanel(next);
+                  if (next && !friendsLoaded) {
+                    const { friends: list } = await getFriendsList();
+                    setFriends(list || []);
+                    setFriendsLoaded(true);
+                  }
+                }}
+                className={cn(
+                  "shrink-0 rounded-md p-1.5 transition-colors",
+                  showAscendPanel
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
 
-              {/* Right side: Storage Info and Settings */}
-              <div className="flex items-start gap-4">
-                <div className="min-w-[250px] rounded-lg bg-secondary/10 p-3">
-                  <div className="space-y-3">
-                    {/* Username section */}
-                    <div className="flex items-center justify-between border-b border-secondary/20 pb-2">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-primary" />
-                        <span className="text-sm font-medium">{username || "Guest"}</span>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9"
-                        onClick={() => navigate("/profile")}
-                      ></Button>
-                    </div>
+          {/* ── Ascend panel ── */}
+          {showAscendPanel && ascendAccess.hasAccess && (() => {
+            const stats = userData?.profileStats;
+            const level = stats?.level ?? 1;
+            const xp = stats?.xp ?? 0;
+            const nextXP = level * 500;
+            const pct = Math.min(100, Math.round((xp / nextXP) * 100));
+            const onlineFriends = friends.filter(f => f.status === "online" || f.status === "busy");
+            return (
+              <div className="px-4 pb-3 pt-1">
+                {/* Level + XP */}
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-primary">Level {level}</span>
+                  <span className="text-[10px] text-muted-foreground">{xp} / {nextXP} XP</span>
+                </div>
+                <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                </div>
 
-                    <div className="mt-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <SquareLibrary className="h-4 w-4 text-primary" />
-                        <span className="text-sm text-muted-foreground">
-                          {t("library.gamesInLibrary")}
-                        </span>
-                      </div>
-                      <span className="text-sm font-medium">
-                        {games.filter(g => !g.isFolder).length +
-                          getGamesInFolders().length}
-                      </span>
-                    </div>
-
-                    {/* Storage section */}
-                    <div>
-                      <div className="mb-1 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <HardDrive className="h-4 w-4 text-primary" />
-                          <span className="text-sm text-muted-foreground">
-                            {t("library.availableSpace")}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">
-                            {storageInfo ? (
-                              formatBytes(storageInfo.freeSpace)
-                            ) : (
-                              <Loader className="h-4 w-4 animate-spin" />
-                            )}
-                          </span>
-                          {storageInfo &&
-                            storageInfo.directories &&
-                            storageInfo.directories.length > 1 && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 w-6 p-0"
-                                onClick={() => setShowStorageDetails(prev => !prev)}
-                              >
-                                {showStorageDetails ? (
-                                  <ChevronUp className="h-4 w-4" />
-                                ) : (
-                                  <ChevronDown className="h-4 w-4" />
-                                )}
-                              </Button>
-                            )}
-                        </div>
-                      </div>
-
-                      {/* If we have multiple directories, show each one */}
-                      {storageInfo &&
-                        storageInfo.directories &&
-                        storageInfo.directories.length > 0 && (
-                          <div className="space-y-2">
-                            {/* Always show the main storage bar */}
-                            <div className="relative mb-2 h-2">
-                              {/* Ascendara Games Space */}
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div
-                                      className="absolute left-0 top-0 h-2 cursor-help rounded-l-full bg-primary"
-                                      style={{
-                                        width: `${storageInfo ? (totalGamesSize / storageInfo.totalSpace) * 100 : 0}%`,
-                                        zIndex: 2,
-                                      }}
-                                    />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="text-secondary">
-                                    {t("library.spaceTooltip.games", {
-                                      size: formatBytes(totalGamesSize),
-                                    })}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-
-                              {/* Other Used Space */}
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <div
-                                      className="absolute left-0 top-0 h-2 cursor-help rounded-r-full bg-muted"
-                                      style={{
-                                        width: `${storageInfo ? ((storageInfo.totalSpace - storageInfo.freeSpace) / storageInfo.totalSpace) * 100 : 0}%`,
-                                        zIndex: 1,
-                                      }}
-                                    />
-                                  </TooltipTrigger>
-                                  <TooltipContent className="text-secondary">
-                                    {t("library.spaceTooltip.other", {
-                                      size: formatBytes(
-                                        storageInfo
-                                          ? storageInfo.totalSpace -
-                                              storageInfo.freeSpace -
-                                              totalGamesSize
-                                          : 0
-                                      ),
-                                    })}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-
-                              {/* Background */}
-                              <div className="h-2 w-full rounded-full bg-muted/30" />
-                            </div>
-
-                            {/* Show detailed directory information when expanded */}
-                            {showStorageDetails && storageInfo.directories.length > 1 && (
-                              <div className="space-y-2 border-t border-secondary/10 pt-1">
-                                <div className="pt-1 text-xs text-muted-foreground">
-                                  {t("library.storageDirectories")}:
+                {/* Online friends */}
+                {friends.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+                      Friends {onlineFriends.length > 0 && <span className="text-primary">· {onlineFriends.length} online</span>}
+                    </p>
+                    <div className="space-y-1">
+                      {friends.slice(0, 5).map(friend => (
+                        <div key={friend.uid} className="flex items-center gap-2">
+                          <div className="relative shrink-0">
+                            {friend.photoURL
+                              ? <img src={friend.photoURL} className="h-5 w-5 rounded-full object-cover" alt="" />
+                              : <div className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground">
+                                  {friend.displayName?.[0]?.toUpperCase()}
                                 </div>
-                                {storageInfo.directories.map((dir, index) => (
-                                  <div key={dir.path} className="space-y-1">
-                                    {/* Directory path label */}
-                                    <div className="flex items-center justify-between text-xs">
-                                      <span
-                                        className="truncate text-muted-foreground"
-                                        style={{ maxWidth: "180px" }}
-                                        title={dir.path}
-                                      >
-                                        {dir.path}
-                                      </span>
-                                      <span className="text-xs font-medium">
-                                        {formatBytes(dir.freeSpace)}{" "}
-                                        {t("library.freeSpace")}
-                                      </span>
-                                    </div>
-
-                                    {/* Storage bar for this directory */}
-                                    <div className="relative h-2">
-                                      {/* Ascendara Games Space */}
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <div
-                                              className="absolute left-0 top-0 h-2 cursor-help rounded-l-full bg-primary"
-                                              style={{
-                                                width: `${dir.totalSpace ? ((dir.gamesSize || 0) / dir.totalSpace) * 100 : 0}%`,
-                                                zIndex: 2,
-                                              }}
-                                            />
-                                          </TooltipTrigger>
-                                          <TooltipContent className="text-secondary">
-                                            {t("library.spaceTooltip.games", {
-                                              size: formatBytes(dir.gamesSize || 0),
-                                              path: dir.path,
-                                            })}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-
-                                      {/* Other Used Space */}
-                                      <TooltipProvider>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <div
-                                              className="absolute left-0 top-0 h-2 cursor-help rounded-r-full bg-muted"
-                                              style={{
-                                                width: `${dir.totalSpace ? ((dir.totalSpace - dir.freeSpace - (dir.gamesSize || 0)) / dir.totalSpace) * 100 : 0}%`,
-                                                zIndex: 1,
-                                              }}
-                                            />
-                                          </TooltipTrigger>
-                                          <TooltipContent className="text-secondary">
-                                            {t("library.spaceTooltip.other", {
-                                              size: formatBytes(
-                                                dir.totalSpace
-                                                  ? dir.totalSpace -
-                                                      dir.freeSpace -
-                                                      (dir.gamesSize || 0)
-                                                  : 0
-                                              ),
-                                              path: dir.path,
-                                            })}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      </TooltipProvider>
-
-                                      {/* Background */}
-                                      <div className="h-2 w-full rounded-full bg-muted/30" />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Total space summary */}
-                            <div className="flex items-center justify-between text-xs text-muted-foreground">
-                              <span>
-                                {t("library.gamesSpace")}:{" "}
-                                {isCalculatingSize ? (
-                                  t("library.calculatingSize")
-                                ) : storageInfo ? (
-                                  formatBytes(totalGamesSize)
-                                ) : (
-                                  <Loader className="h-4 w-4 animate-spin" />
-                                )}
-                              </span>
-                              <span>
-                                {t("library.totalSpace")}:{" "}
-                                {formatBytes(storageInfo.totalSpace)}
-                              </span>
-                            </div>
+                            }
+                            <span className={cn(
+                              "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-1 ring-background",
+                              friend.status === "online" ? "bg-green-500"
+                              : friend.status === "busy" ? "bg-yellow-500"
+                              : "bg-muted-foreground/40"
+                            )} />
                           </div>
-                        )}
-
-                      {/* Fallback to original single storage bar if no directories data */}
-                      {(!storageInfo ||
-                        !storageInfo.directories ||
-                        storageInfo.directories.length === 0) && (
-                        <div className="space-y-2">
-                          <div className="relative mb-2">
-                            {/* Ascendara Games Space */}
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div
-                                    className="absolute left-0 top-0 h-2 cursor-help rounded-l-full bg-primary"
-                                    style={{
-                                      width: `${storageInfo ? (totalGamesSize / storageInfo.totalSpace) * 100 : 0}%`,
-                                      zIndex: 2,
-                                    }}
-                                  />
-                                </TooltipTrigger>
-                                <TooltipContent className="text-secondary">
-                                  {t("library.spaceTooltip.games", {
-                                    size: formatBytes(totalGamesSize),
-                                  })}
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-
-                            {/* Other Used Space */}
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div
-                                    className="absolute left-0 top-0 h-2 cursor-help rounded-r-full bg-muted"
-                                    style={{
-                                      width: `${storageInfo ? ((storageInfo.totalSpace - storageInfo.freeSpace) / storageInfo.totalSpace) * 100 : 0}%`,
-                                      zIndex: 1,
-                                    }}
-                                  />
-                                </TooltipTrigger>
-                                <TooltipContent className="text-secondary">
-                                  {t("library.spaceTooltip.other", {
-                                    size: formatBytes(
-                                      storageInfo
-                                        ? storageInfo.totalSpace -
-                                            storageInfo.freeSpace -
-                                            totalGamesSize
-                                        : 0
-                                    ),
-                                  })}
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
-
-                            {/* Background */}
-                            <div className="h-2 w-full rounded-full bg-muted/30" />
-                          </div>
-                          <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>
-                              {t("library.gamesSpace")}:{" "}
-                              {isCalculatingSize ? (
-                                t("library.calculatingSize")
-                              ) : storageInfo ? (
-                                formatBytes(totalGamesSize)
-                              ) : (
-                                <Loader className="h-4 w-4 animate-spin" />
-                              )}
-                            </span>
-                          </div>
+                          <span className="truncate text-[11px] text-foreground/80">{friend.displayName}</span>
                         </div>
+                      ))}
+                      {friends.length > 5 && (
+                        <p className="text-[10px] text-muted-foreground">+{friends.length - 5} more</p>
                       )}
                     </div>
                   </div>
-                </div>
+                )}
+                {friends.length === 0 && friendsLoaded && (
+                  <p className="text-[11px] text-muted-foreground">No friends yet</p>
+                )}
               </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <AlertDialog
-              key="add-game-dialog"
-              open={isAddGameOpen}
-              onOpenChange={setIsAddGameOpen}
+            );
+          })()}
+        </div>
+
+        {/* ── Library views ── */}
+        <nav className="space-y-0.5 px-2 pt-3">
+          <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Library</p>
+          {sidebarTabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => { setActiveTab(tab.id); setCurrentPage(1); }}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-all",
+                activeTab === tab.id
+                  ? "bg-primary/10 font-semibold text-primary"
+                  : "font-medium text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+              )}
             >
+              <span className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
+                activeTab === tab.id ? "bg-primary/15 text-primary" : "text-muted-foreground"
+              )}>
+                {tab.icon}
+              </span>
+              <span className="flex-1 text-left">{tab.label}</span>
+              {tab.count > 0 && (
+                <span className={cn(
+                  "min-w-[1.25rem] rounded px-1 py-0.5 text-center text-[10px] font-bold tabular-nums",
+                  activeTab === tab.id
+                    ? "bg-primary/20 text-primary"
+                    : "bg-muted/80 text-muted-foreground"
+                )}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        {/* ── Actions ── */}
+        <div className="space-y-0.5 px-2 pt-3">
+          <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Manage</p>
+
+          <TooltipProvider>
+            <AlertDialog key="add-game-dialog" open={isAddGameOpen} onOpenChange={setIsAddGameOpen}>
               <AlertDialogTrigger asChild>
-                <AddGameCard />
+                <button className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-accent/60 hover:text-foreground">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
+                    <Plus className="h-4 w-4" />
+                  </span>
+                  <span>{t("library.addGame.title") || "Add Game"}</span>
+                </button>
               </AlertDialogTrigger>
               <AlertDialogContent className="border-border bg-background sm:max-w-[425px]">
                 <AlertDialogHeader className="space-y-2">
@@ -1691,156 +1290,323 @@ const Library = () => {
               </AlertDialogContent>
             </AlertDialog>
 
-            <DndProvider backend={HTML5Backend}>
-              {paginatedGames
-                .sort((a, b) => (a.isFolder === b.isFolder ? 0 : a.isFolder ? -1 : 1))
-                .map(game => (
-                  <div key={game.game || game.name}>
-                    {game.isFolder ? (
-                      <DroppableFolderCard
-                        folder={game}
-                        onDropGame={droppedGame => {
-                          // Add game to folder using the folderManager library
-                          addGameToFolder(droppedGame, game.game);
+            <button
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-accent/60 hover:text-foreground"
+              onClick={() => setIsNewFolderOpen(true)}
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
+                <FolderPlus className="h-4 w-4" />
+              </span>
+              <span>{t("library.newFolder.create") || "New Folder"}</span>
+            </button>
+            <NewFolderDialog open={isNewFolderOpen} onOpenChange={setIsNewFolderOpen} onCreate={handleCreateFolder} />
 
-                          // Get updated folder object from storage
-                          const updatedFolders = loadFolders();
-                          const updatedFolder = updatedFolders.find(
-                            f => f.game === game.game
-                          );
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-accent/60 hover:text-foreground",
+                    isSyncingLibrary && "cursor-not-allowed opacity-50"
+                  )}
+                  onClick={handleCloudSync}
+                  disabled={isSyncingLibrary}
+                >
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
+                    {isSyncingLibrary ? <Loader className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
+                  </span>
+                  <span>{t("library.cloudSync") || "Sync to Cloud"}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="text-secondary">
+                {user ? t("library.cloudSync") || "Sync to Cloud" : t("library.signInToSync") || "Sign in to sync"}
+              </TooltipContent>
+            </Tooltip>
 
-                          // Update folders state
-                          setFolders(updatedFolders);
+            <button
+              onClick={() => handleCalculateLibraryValue()}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-muted-foreground transition-all hover:bg-accent/60 hover:text-foreground"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground">
+                <DollarSign className="h-4 w-4" />
+              </span>
+              <span className="truncate">
+                {libraryValueData && !libraryHasChanged()
+                  ? `$${libraryValueData.totalValue.toFixed(2)}`
+                  : t("library.libraryValue.calculate") || "Library Value"}
+              </span>
+            </button>
+          </TooltipProvider>
+        </div>
 
-                          // Remove game from main list and update the folder in games array
-                          setGames(prevGames =>
-                            prevGames
-                              .map(g => {
-                                if (g.isFolder && g.game === game.game) {
-                                  // Replace with updated folder object
-                                  return { ...updatedFolder };
-                                }
-                                return g;
-                              })
-                              .filter(
-                                g =>
-                                  (g.game || g.name) !==
-                                    (droppedGame.game || droppedGame.name) ||
-                                  (g.isFolder && g.game === game.game)
-                              )
-                          );
-                        }}
-                      >
-                        <FolderCard
-                          key={game.game + "-" + (game.items ? game.items.length : 0)}
-                          name={game.game || game.name}
-                          folder={game}
-                          refreshKey={game.items ? game.items.length : 0}
-                        />
-                      </DroppableFolderCard>
-                    ) : (
-                      <DraggableGameCard game={game}>
-                        <InstalledGameCard
-                          game={game}
-                          onPlay={() =>
-                            selectionMode ? handleSelectGame(game) : handlePlayGame(game)
-                          }
-                          favorites={favorites}
-                          onToggleFavorite={() => toggleFavorite(game.game || game.name)}
-                          selectionMode={selectionMode}
-                          isSelected={selectedGames.includes(game.game)}
-                          onSelectCheckbox={() => handleSelectGame(game)}
-                          updateInfo={game.gameID ? gameUpdates[game.gameID] : null}
-                        />
-                      </DraggableGameCard>
-                    )}
-                  </div>
-                ))}
-            </DndProvider>
+        {/* ── Spacer pushes storage to bottom ── */}
+        <div className="flex-1" />
+
+        {/* ── Storage info ── */}
+        <div className="px-4 pb-4 pt-2">
+          <div className="rounded-lg bg-muted/30 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <HardDrive className="h-3 w-3" />
+                <span className="font-medium">{t("library.availableSpace") || "Available"}</span>
+              </div>
+              <span className="text-xs font-semibold text-foreground">
+                {storageInfo ? formatBytes(storageInfo.freeSpace) : <Loader className="h-3 w-3 animate-spin" />}
+              </span>
+            </div>
+            {storageInfo && (
+              <>
+                <div className="relative h-1 overflow-hidden rounded-full bg-muted/50">
+                  <div
+                    className="absolute left-0 top-0 h-full rounded-full bg-primary"
+                    style={{ width: `${Math.min((totalGamesSize / storageInfo.totalSpace) * 100, 100)}%`, zIndex: 2 }}
+                  />
+                  <div
+                    className="absolute left-0 top-0 h-full rounded-full bg-muted-foreground/30"
+                    style={{ width: `${Math.min(((storageInfo.totalSpace - storageInfo.freeSpace) / storageInfo.totalSpace) * 100, 100)}%`, zIndex: 1 }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>{isCalculatingSize ? "…" : formatBytes(totalGamesSize)} games</span>
+                  <span>{formatBytes(storageInfo.totalSpace)}</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main Content ─────────────────────────────────────────── */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Sticky toolbar */}
+        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-background/95 px-6 py-3 backdrop-blur-sm">
+          <div className="relative flex-1">
+            <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder={t("library.searchLibrary")}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="h-9 pl-9"
+            />
           </div>
 
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="mt-6 flex justify-center gap-2">
-              <Button
-                variant="outline"
-                className="px-3"
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                {t("common.prev")}
-              </Button>
-              <span className="px-4 py-2 text-sm text-muted-foreground">
-                {t("common.page")} {currentPage} / {totalPages}
+          <TooltipProvider>
+            <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
+              <DropdownMenuTrigger asChild>
+                <button className="rounded-md p-2 hover:bg-secondary/50" type="button">
+                  <SortAscIcon className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => setSortOrder("asc")} className={cn("cursor-pointer", sortOrder === "asc" && "bg-accent/50")}>
+                  <ArrowUpAZ className="mr-2 h-4 w-4" />
+                  {t("library.sort.aToZ")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortOrder("desc")} className={cn("cursor-pointer", sortOrder === "desc" && "bg-accent/50")}>
+                  <ArrowDownAZ className="mr-2 h-4 w-4" />
+                  {t("library.sort.zToA")}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem className="cursor-pointer" checked={filters.vrOnly} onCheckedChange={checked => setFilters(prev => ({ ...prev, vrOnly: checked }))}>
+                  <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 10C2 8.89543 2.89543 8 4 8H20C21.1046 8 22 8.89543 22 10V17C22 18.1046 21.1046 19 20 19H16.1324C15.4299 19 14.7788 18.6314 14.4174 18.029L12.8575 15.4292C12.4691 14.7818 11.5309 14.7818 11.1425 15.4292L9.58261 18.029C9.22116 18.6314 8.57014 19 7.86762 19H4C2.89543 19 2 18.1046 2 17V10Z" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M3.81253 6.7812C4.5544 5.6684 5.80332 5 7.14074 5H16.8593C18.1967 5 19.4456 5.6684 20.1875 6.7812L21 8H3L3.81253 6.7812Z" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  {t("library.filters.vrGames")}
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem className="cursor-pointer" checked={filters.onlineGames} onCheckedChange={checked => setFilters(prev => ({ ...prev, onlineGames: checked }))}>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  {t("library.filters.onlineGames")}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn("rounded-md p-2 hover:bg-secondary/50", selectionMode && "bg-primary/10 text-primary")}
+                  type="button"
+                  onClick={() => { setSelectionMode(prev => !prev); setSelectedGames([]); }}
+                >
+                  <CheckSquareIcon className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent className="text-secondary">{t("library.multiselect")}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {selectionMode && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-primary">
+                {t("library.tools.selected", { count: selectedGames.length })}
               </span>
-              <Button
-                variant="outline"
-                className="px-3"
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-              >
-                {t("common.next")}
+              <Button variant="destructive" size="sm" disabled={selectedGames.length === 0} onClick={handleBulkRemove}>
+                {t("library.tools.bulkRemove")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => { setSelectionMode(false); setSelectedGames([]); }}>
+                {t("common.cancel")}
               </Button>
             </div>
           )}
 
-          {/* Cloud-Only Games Section */}
-          {user && cloudOnlyGames.length > 0 && (
-            <div className="mt-10">
-              <div className="mb-4 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500/20 to-cyan-500/20">
-                  <Cloud className="h-5 w-5 text-blue-500" />
+          {error && (
+            <div className="text-sm text-destructive">{error}</div>
+          )}
+        </div>
+
+        {/* Scrollable game grid */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {/* ── All Games / Favorites tab ── */}
+          {(activeTab === "all" || activeTab === "favorites") && (
+            <>
+              <DndProvider backend={HTML5Backend}>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {activeTab === "all" && (
+                    <button
+                      key="add-game-inline"
+                      onClick={() => setIsAddGameOpen(true)}
+                      className="group flex flex-col overflow-hidden rounded-xl border border-dashed border-border cursor-pointer transition-all hover:border-primary/50 hover:shadow-md"
+                    >
+                      <div className="flex aspect-[2/3] w-full items-center justify-center bg-muted/20 group-hover:bg-primary/5 transition-colors">
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="rounded-full bg-muted p-3 group-hover:bg-primary/10 transition-colors">
+                            <Plus className="h-5 w-5 text-muted-foreground group-hover:text-primary" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="px-3 py-2">
+                        <p className="truncate text-sm mt-2 font-semibold leading-tight text-muted-foreground group-hover:text-primary transition-colors">
+                          {t("library.addGame.title")}
+                        </p>
+                        <p className="text-xs text-muted-foreground/50">&nbsp;</p>
+                      </div>
+                    </button>
+                  )}
+                  {tabPaginatedGames
+                    .sort((a, b) => (a.isFolder === b.isFolder ? 0 : a.isFolder ? -1 : 1))
+                    .map(game => (
+                      <div key={game.game || game.name}>
+                        {game.isFolder ? (
+                          <DroppableFolderCard
+                            folder={game}
+                            onDropGame={droppedGame => {
+                              addGameToFolder(droppedGame, game.game);
+                              const updatedFolders = loadFolders();
+                              const updatedFolder = updatedFolders.find(f => f.game === game.game);
+                              setFolders(updatedFolders);
+                              setGames(prevGames =>
+                                prevGames
+                                  .map(g => {
+                                    if (g.isFolder && g.game === game.game) return { ...updatedFolder };
+                                    return g;
+                                  })
+                                  .filter(g =>
+                                    (g.game || g.name) !== (droppedGame.game || droppedGame.name) ||
+                                    (g.isFolder && g.game === game.game)
+                                  )
+                              );
+                            }}
+                          >
+                            <FolderCard
+                              key={game.game + "-" + (game.items ? game.items.length : 0)}
+                              name={game.game || game.name}
+                              folder={game}
+                              refreshKey={game.items ? game.items.length : 0}
+                            />
+                          </DroppableFolderCard>
+                        ) : (
+                          <DraggableGameCard game={game}>
+                            <InstalledGameCard
+                              game={game}
+                              onPlay={() => selectionMode ? handleSelectGame(game) : handlePlayGame(game)}
+                              favorites={favorites}
+                              onToggleFavorite={() => toggleFavorite(game.game || game.name)}
+                              selectionMode={selectionMode}
+                              isSelected={selectedGames.includes(game.game)}
+                              onSelectCheckbox={() => handleSelectGame(game)}
+                              updateInfo={game.gameID ? gameUpdates[game.gameID] : null}
+                            />
+                          </DraggableGameCard>
+                        )}
+                      </div>
+                    ))}
                 </div>
-                <div>
-                  <h2 className="!mb-0 text-xl font-semibold">
-                    {t("library.cloudOnly.title")}
-                  </h2>
+              </DndProvider>
+
+              {tabPaginatedGames.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-24 text-center">
+                  <SquareLibrary className="mb-4 h-12 w-12 text-muted-foreground/30" />
                   <p className="text-sm text-muted-foreground">
-                    {t("library.cloudOnly.subtitle")}
+                    {activeTab === "favorites" ? (t("library.filters.favorites") + " — no games yet") : t("library.noGamesFound") || "No games found"}
                   </p>
                 </div>
-              </div>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {cloudOnlyGames.map(game => (
-                  <CloudOnlyGameCard
-                    key={game.name}
-                    game={game}
-                    imageData={cloudGameImages[game.name]}
-                    onRestore={() => handleRestoreFromCloud(game)}
-                    isRestoring={restoringGame === game.name}
-                  />
-                ))}
-              </div>
-            </div>
+              )}
+
+              {tabTotalPages > 1 && (
+                <div className="mt-6 flex items-center justify-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
+                    {t("common.prev")}
+                  </Button>
+                  <span className="px-3 text-sm text-muted-foreground">
+                    {t("common.page")} {currentPage} / {tabTotalPages}
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(tabTotalPages, p + 1))} disabled={currentPage === tabTotalPages}>
+                    {t("common.next")}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
 
-          {/* Play Later Games Section */}
-          {playLaterGames.length > 0 && (
-            <div className="mt-10">
-              <div className="mb-4 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20">
-                  <Clock className="h-5 w-5 text-amber-500" />
+          {/* ── Cloud Library tab ── */}
+          {activeTab === "cloud" && (
+            <>
+              {loadingCloudGames ? (
+                <div className="flex items-center justify-center py-24">
+                  <Loader className="h-8 w-8 animate-spin text-primary" />
                 </div>
-                <div>
-                  <h2 className="!mb-0 text-xl font-semibold">
-                    {t("library.playLater.title")}
-                  </h2>
-                  <p className="text-sm text-muted-foreground">
-                    {t("library.playLater.subtitle")}
-                  </p>
+              ) : cloudOnlyGames.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-24 text-center">
+                  <Cloud className="mb-4 h-12 w-12 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">{t("library.cloudOnly.empty") || "No cloud-only games"}</p>
                 </div>
-              </div>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {playLaterGames.map(game => (
-                  <PlayLaterGameCard
-                    key={game.game}
-                    game={game}
-                    onDownload={() => handleDownloadPlayLater(game)}
-                    onRemove={() => handleRemoveFromPlayLater(game.game)}
-                  />
-                ))}
-              </div>
-            </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {cloudOnlyGames.map(game => (
+                    <CloudOnlyGameCard
+                      key={game.name}
+                      game={game}
+                      imageData={cloudGameImages[game.name]}
+                      onRestore={() => handleRestoreFromCloud(game)}
+                      isRestoring={restoringGame === game.name}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Play Later tab ── */}
+          {activeTab === "playLater" && (
+            <>
+              {playLaterGames.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-24 text-center">
+                  <Clock className="mb-4 h-12 w-12 text-muted-foreground/30" />
+                  <p className="text-sm text-muted-foreground">{t("library.playLater.empty") || "No games in Play Later"}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {playLaterGames.map(game => (
+                    <PlayLaterGameCard
+                      key={game.game}
+                      game={game}
+                      onDownload={() => handleDownloadPlayLater(game)}
+                      onRemove={() => handleRemoveFromPlayLater(game.game)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -2067,6 +1833,7 @@ const InstalledGameCard = memo(
     const [logoData, setLogoData] = useState(null);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [isUninstalling, setIsUninstalling] = useState(false);
+    const [isReportOpen, setIsReportOpen] = useState(false);
     const isFavorite = favorites.includes(game.game || game.name);
 
     useEffect(() => {
@@ -2128,7 +1895,8 @@ const InstalledGameCard = memo(
         if (gameImageCache.has(gameId)) return;
 
         try {
-          const imageBase64 = await window.electron.getGameImage(gameId);
+          // Prefer portrait grid image (600x900) for the 2:3 card layout
+          const imageBase64 = await window.electron.getGameImage(gameId, "grid");
           if (imageBase64 && isMounted) {
             const dataUrl = `data:image/jpeg;base64,${imageBase64}`;
             gameImageCache.set(gameId, dataUrl);
@@ -2549,9 +2317,9 @@ const InstalledGameCard = memo(
 
         <Card
           className={cn(
-            "group relative overflow-hidden rounded-xl border border-border bg-card shadow-lg transition-all duration-200",
-            "hover:-translate-y-1 hover:shadow-xl",
-            isSelected && "bg-primary/10 ring-2 ring-primary",
+            "group relative overflow-hidden rounded-xl border border-border bg-card shadow-md transition-all duration-200",
+            "hover:-translate-y-1 hover:shadow-xl hover:border-primary/30",
+            isSelected && "ring-2 ring-primary",
             selectionMode && game.isCustom && "selectable-card",
             "cursor-pointer"
           )}
@@ -2733,103 +2501,74 @@ const InstalledGameCard = memo(
           )}
 
           <CardContent className="p-0">
-            <div className="relative aspect-[4/3] overflow-hidden">
-              <img
-                src={imageData}
-                alt={game.game}
-                className="h-full w-full border-b border-border object-cover transition-transform duration-300 group-hover:scale-105"
-              />
-              {typeof game.launchCount === "undefined" && !game.isCustom && (
-                <span className="pointer-events-none absolute left-2 top-2 z-20 select-none rounded bg-secondary px-2 py-0.5 text-xs font-bold text-primary">
-                  {t("library.newBadge")}
-                </span>
+            <div className="relative aspect-[2/3] overflow-hidden">
+              {imageData ? (
+                <img
+                  src={imageData}
+                  alt={game.game}
+                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-muted">
+                  <Gamepad2 className="h-12 w-12 text-muted-foreground/30" />
+                </div>
               )}
-              {updateInfo?.updateAvailable && (
-                <span className="pointer-events-none absolute right-2 top-2 z-20 flex select-none items-center gap-1 rounded bg-primary px-2 py-0.5 text-xs font-bold text-secondary">
-                  <Import className="h-3 w-3" />
-                  {t("gameScreen.updateBadge")}
-                </span>
+              {/* Running indicator */}
+              {isRunning && (
+                <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-green-500 to-emerald-400" />
               )}
-              {/* Floating action bar for buttons */}
-              <div className="absolute bottom-3 right-3 z-10 flex gap-2 rounded-lg bg-black/60 p-2 opacity-90 shadow-md transition-opacity hover:opacity-100">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-white hover:bg-white/20 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
-                  title={
-                    isFavorite ? t("library.removeFavorite") : t("library.addFavorite")
-                  }
-                  tabIndex={0}
-                  onClick={e => {
-                    e.stopPropagation();
-                    onToggleFavorite(game.game || game.name);
-                  }}
-                >
-                  <Heart
-                    className={cn(
-                      "h-6 w-6",
-                      isFavorite ? "fill-primary text-primary" : "fill-none text-white"
-                    )}
-                  />
-                </Button>
+              {/* Badges row */}
+              <div className="absolute left-2 top-2 z-20 flex flex-col gap-1">
+                {typeof game.launchCount === "undefined" && !game.isCustom && (
+                  <span className="rounded bg-secondary px-1.5 py-0.5 text-xs font-bold text-primary">
+                    {t("library.newBadge")}
+                  </span>
+                )}
+                {updateInfo?.updateAvailable && (
+                  <span className="flex items-center gap-1 rounded bg-primary px-1.5 py-0.5 text-xs font-bold text-secondary">
+                    <Import className="h-3 w-3" />
+                    {t("gameScreen.updateBadge")}
+                  </span>
+                )}
+              </div>
+              {/* Hover overlay with title + actions */}
+              <div className={cn(
+                "absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/80 via-black/20 to-transparent p-3 transition-opacity duration-200",
+                isHovered ? "opacity-100" : "opacity-0"
+              )}>
+                <p className="mb-2 line-clamp-2 text-sm font-semibold leading-tight text-white">
+                  {game.game}
+                </p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    {game.online && <Gamepad2 className="h-3.5 w-3.5 text-white/70" />}
+                    {game.dlc && <Gift className="h-3.5 w-3.5 text-white/70" />}
+                    {isRunning && <span className="text-xs font-medium text-green-400">Playing</span>}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-white hover:bg-white/20 hover:text-primary"
+                    onClick={e => { e.stopPropagation(); onToggleFavorite(game.game || game.name); }}
+                  >
+                    <Heart className={cn("h-4 w-4", isFavorite ? "fill-primary text-primary" : "fill-none text-white")} />
+                  </Button>
+                </div>
               </div>
             </div>
           </CardContent>
-          <CardFooter className="flex flex-col items-start gap-2 p-4 pt-3">
-            <div className="flex w-full items-center gap-2">
-              <h3 className="flex-1 truncate text-lg font-semibold text-foreground">
-                {game.game}
-              </h3>
-              {game.online && <Gamepad2 className="h-4 w-4 text-muted-foreground" />}
-              {game.dlc && <Gift className="h-4 w-4 text-muted-foreground" />}
-              {game.isVr && (
-                <svg
-                  className="p-0.5 text-foreground"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    d="M2 10C2 8.89543 2.89543 8 4 8H20C21.1046 8 22 8.89543 22 10V17C22 18.1046 21.1046 19 20 19H16.1324C15.4299 19 14.7788 18.6314 14.4174 18.029L12.8575 15.4292C12.4691 14.7818 11.5309 14.7818 11.1425 15.4292L9.58261 18.029C9.22116 18.6314 8.57014 19 7.86762 19H4C2.89543 19 2 18.1046 2 17V10Z"
-                    stroke="currentColor"
-                    strokeWidth={1.3}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M3.81253 6.7812C4.5544 5.6684 5.80332 5 7.14074 5H16.8593C18.1967 5 19.4456 5.6684 20.1875 6.7812L21 8H3L3.81253 6.7812Z"
-                    stroke="currentColor"
-                    strokeWidth={1.3}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              )}
-              {executableExists === true && (
-                <AlertTriangle
-                  className="h-4 w-4 text-yellow-500"
-                  title={t("library.executableNotFound")}
-                />
-              )}
-            </div>
-            <p className="line-clamp-2 w-full text-sm text-muted-foreground">
-              {game.playTime !== undefined ? (
-                <span className="font-medium md:text-xs">
-                  {game.playTime < 60
-                    ? t("library.lessThanMinute")
-                    : game.playTime < 120
-                      ? `1 ${t("library.minute")} ${t("library.ofPlaytime")}`
-                      : game.playTime < 3600
-                        ? `${Math.floor(game.playTime / 60)} ${t("library.minutes")} ${t("library.ofPlaytime")}`
-                        : game.playTime < 7200
-                          ? `1 ${t("library.hour")} ${t("library.ofPlaytime")}`
-                          : `${Math.floor(game.playTime / 3600)} ${t("library.hours")} ${t("library.ofPlaytime")}`}
-                </span>
-              ) : (
-                <span className="font-medium md:text-xs">{t("library.neverPlayed")}</span>
-              )}
+          <CardFooter className="flex flex-col items-start gap-1 px-3 py-2">
+            <h3 className="w-full truncate text-sm font-semibold leading-tight text-foreground">
+              {game.game}
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              {game.playTime !== undefined
+                ? game.playTime < 60
+                  ? t("library.lessThanMinute")
+                  : game.playTime < 3600
+                    ? `${Math.floor(game.playTime / 60)}m`
+                    : `${Math.floor(game.playTime / 3600)}h`
+                : t("library.neverPlayed")}
             </p>
           </CardFooter>
         </Card>
@@ -2889,7 +2628,7 @@ const CloudOnlyGameCard = memo(({ game, imageData, onRestore, isRestoring }) => 
       )}
     >
       <CardContent className="p-0">
-        <div className="relative aspect-[4/3] overflow-hidden">
+        <div className="relative aspect-[2/3] overflow-hidden">
           {/* Gray overlay with shimmer animation */}
           <div
             className={cn(
@@ -2933,16 +2672,16 @@ const CloudOnlyGameCard = memo(({ game, imageData, onRestore, isRestoring }) => 
           </span>
         </div>
       </CardContent>
-      <CardFooter className="flex flex-col items-start gap-3 p-4 pt-3">
-        <div className="flex w-full items-center gap-2">
-          <h3 className="flex-1 truncate text-lg font-semibold text-foreground">
+      <CardFooter className="flex flex-col items-start gap-2 px-3 py-2">
+        <div className="flex w-full items-center gap-1.5">
+          <h3 className="flex-1 truncate text-sm font-semibold leading-tight text-foreground">
             {game.name}
           </h3>
-          {game.online && <Gamepad2 className="h-4 w-4 text-muted-foreground" />}
-          {game.dlc && <Gift className="h-4 w-4 text-muted-foreground" />}
+          {game.online && <Gamepad2 className="h-3.5 w-3.5 text-muted-foreground" />}
+          {game.dlc && <Gift className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
-        <div className="flex w-full items-center gap-2 text-sm text-muted-foreground">
-          <Clock className="h-4 w-4" />
+        <div className="flex w-full items-center gap-1.5 text-xs text-muted-foreground">
+          <Clock className="h-3.5 w-3.5" />
           <span>{formatPlaytime(game.playTime)}</span>
         </div>
         <Button
@@ -2992,7 +2731,24 @@ const PlayLaterGameCard = memo(({ game, onDownload, onRemove }) => {
   useEffect(() => {
     let isMounted = true;
     const loadImage = async () => {
-      // Try SteamGridDB fallback when no imgID is available
+      // 1. Load via imgID when available (games from Search/Download always have one)
+      if (game.imgID) {
+        try {
+          const imageCacheService = await import("@/services/imageCacheService");
+          const url = await imageCacheService.default.getImage(game.imgID, {
+            priority: "normal",
+            quality: "high",
+          });
+          if (url && isMounted) {
+            setImageData(url);
+            return;
+          }
+        } catch (error) {
+          console.warn("imageCacheService failed for play later image:", error);
+        }
+      }
+
+      // 2. Try SteamGridDB fallback when no imgID is available
       if (game.game && !game.imgID) {
         try {
           const steamGridImageService = await import("@/services/steamGridImageService");
@@ -3027,7 +2783,7 @@ const PlayLaterGameCard = memo(({ game, onDownload, onRemove }) => {
       )}
     >
       <CardContent className="p-0">
-        <div className="relative aspect-[4/3] overflow-hidden">
+        <div className="relative aspect-[2/3] overflow-hidden">
           {/* Amber overlay with shimmer animation */}
           <div className="absolute inset-0 z-10 bg-gradient-to-br from-amber-400/40 via-orange-500/30 to-amber-600/40">
             <div
@@ -3067,18 +2823,18 @@ const PlayLaterGameCard = memo(({ game, onDownload, onRemove }) => {
           </button>
         </div>
       </CardContent>
-      <CardFooter className="flex flex-col items-start gap-3 p-4 pt-3">
-        <div className="flex w-full items-center gap-2">
-          <h3 className="flex-1 truncate text-lg font-semibold text-foreground">
+      <CardFooter className="flex flex-col items-start gap-2 px-3 py-2">
+        <div className="flex w-full items-center gap-1.5">
+          <h3 className="flex-1 truncate text-sm font-semibold leading-tight text-foreground">
             {game.game}
           </h3>
-          {game.online && <Gamepad2 className="h-4 w-4 text-muted-foreground" />}
-          {game.dlc && <Gift className="h-4 w-4 text-muted-foreground" />}
+          {game.online && <Gamepad2 className="h-3.5 w-3.5 text-muted-foreground" />}
+          {game.dlc && <Gift className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>
-        <div className="flex w-full items-center justify-between text-sm text-muted-foreground">
+        <div className="flex w-full items-center justify-between text-xs text-muted-foreground">
           {game.size && <span>{game.size}</span>}
           {game.addedAt && (
-            <span className="text-xs">
+            <span>
               {t("library.playLater.addedOn")} {formatAddedDate(game.addedAt)}
             </span>
           )}
