@@ -268,6 +268,16 @@ function setRPCState(state) {
         .catch(err => {
           console.log("Failed to set Discord RPC activity:", err);
         });
+    } else if (state === "idle") {
+      rpc
+        .setActivity({
+          state: "Idling...",
+          largeImageKey: "ascendara",
+          largeImageText: "Ascendara",
+        })
+        .catch(err => {
+          console.log("Failed to set Discord RPC activity:", err);
+        });
     }
   } catch (err) {
     console.log("Failed to update Discord RPC activity:", err);

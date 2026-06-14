@@ -772,6 +772,28 @@ const ScrollToTop = () => {
   return null;
 };
 
+// Track navigation and update Discord RPC state
+const DiscordRPCTracker = () => {
+  const { pathname } = useLocation();
+  const { settings } = useSettings();
+  const lastPathRef = useRef(null);
+
+  useEffect(() => {
+    if (!window.electron?.switchRPC) return;
+    if (!settings?.rpcEnabled) return;
+    if (lastPathRef.current === pathname) return;
+    lastPathRef.current = pathname;
+
+    if (pathname === "/download" || pathname === "/downloads" || pathname === "/torboxdownloads") {
+      window.electron.switchRPC("downloading");
+    } else {
+      window.electron.switchRPC("default");
+    }
+  }, [pathname, settings?.rpcEnabled]);
+
+  return null;
+};
+
 // Track user activity and update Firebase customMessage
 const UserActivityTracker = React.memo(() => {
   const { pathname, state } = useLocation();
@@ -2040,6 +2062,7 @@ function App() {
                     <ScrollToTop />
                     <AscendStatusInitializer />
                     <DownloadSyncInitializer />
+                    <DiscordRPCTracker />
                     <UserActivityTracker />
                     <MessageNotificationChecker />
                     <TrialWarningChecker />
