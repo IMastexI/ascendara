@@ -1857,6 +1857,17 @@
     "openFolder": "Open",
     "openGameDirectory": "Open Game Directory",
     "pageTitle": "Your Library",
+    "redesignWelcome": {
+      "title": "Your Library, Redesigned",
+      "subtitle": "Ascendara has had a full library makeover. Here's what's new:",
+      "feature1Title": "New management sidebar",
+      "feature1Desc": "add games, create folders, sync to cloud, and more — all in one place",
+      "feature2Title": "Complete layout redesign",
+      "feature2Desc": "a cleaner, faster experience with tabs for Favorites, Play Later, and Cloud",
+      "feature3Title": "Easier game info editing",
+      "feature3Desc": "update covers, tags, and details right from the game card",
+      "cta": "Let's go"
+    },
     "play": "Play",
     "playLater": {
       "addedOn": "Added",

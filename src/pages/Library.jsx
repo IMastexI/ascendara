@@ -55,6 +55,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -197,10 +198,27 @@ const Library = () => {
   const [showAscendPanel, setShowAscendPanel] = useState(false);
   const [friends, setFriends] = useState([]);
   const [friendsLoaded, setFriendsLoaded] = useState(false);
+  const [showRedesignDialog, setShowRedesignDialog] = useState(false);
 
   useEffect(() => {
     safeSetItem("game-favorites", JSON.stringify(favorites));
   }, [favorites]);
+
+  useEffect(() => {
+    const checkRedesignDialog = async () => {
+      const alreadyShown = localStorage.getItem("library-redesign-welcome-shown");
+      if (alreadyShown) return;
+      try {
+        const hasLaunched = await window.electron.hasLaunched();
+        if (hasLaunched) {
+          setTimeout(() => setShowRedesignDialog(true), 800);
+        }
+      } catch (e) {
+        console.error("Failed to check launch status for redesign dialog:", e);
+      }
+    };
+    checkRedesignDialog();
+  }, []);
 
   useLibrarySearch();
 
@@ -1114,10 +1132,10 @@ const Library = () => {
   return (
     <div className="fixed inset-0 top-[60px] flex overflow-hidden bg-background">
       {/* ── Left Sidebar ─────────────────────────────────────────── */}
-      <aside className="flex w-60 shrink-0 flex-col border-r border-border/60">
+      <aside className="flex w-60 shrink-0 flex-col border-r border-border/30 shadow-[1px_0_0_0_hsl(var(--border)/0.15)]">
 
         {/* ── User profile strip ── */}
-        <div className="border-b border-border/60">
+        <div className="bg-muted/30 rounded-none">
           <div className="flex items-center gap-3 px-4 pb-3 pt-3">
             <button
               className="flex min-w-0 flex-1 items-center gap-3 rounded-lg transition-colors hover:opacity-80"
@@ -1378,7 +1396,7 @@ const Library = () => {
       {/* ── Main Content ─────────────────────────────────────────── */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Sticky toolbar */}
-        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-background/95 px-6 py-3 backdrop-blur-sm">
+        <div className="flex shrink-0 items-center gap-3 bg-background/95 px-6 py-3 backdrop-blur-sm shadow-[0_1px_0_0_hsl(var(--border)/0.4)]">
           <div className="relative flex-1">
             <SearchIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -1779,6 +1797,53 @@ const Library = () => {
               </Button>
             )}
             <AlertDialogCancel>{t("common.close") || "Close"}</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Library Redesign Welcome Dialog ── */}
+      <AlertDialog open={showRedesignDialog} onOpenChange={setShowRedesignDialog}>
+        <AlertDialogContent className="border-border sm:max-w-[460px]">
+          <AlertDialogHeader>
+            <div className="mb-1 flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15">
+                <SquareLibrary className="h-5 w-5 text-primary" />
+              </div>
+              <AlertDialogTitle className="text-xl font-bold text-foreground">
+                {t("library.redesignWelcome.title")}
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  {t("library.redesignWelcome.subtitle")}
+                </p>
+                <div className="space-y-2 rounded-lg bg-muted/40 p-3 text-sm">
+                  <div className="flex items-start gap-2">
+                    <span className="mt-0.5 text-primary">✦</span>
+                    <span className="text-foreground/80"><span className="font-medium text-foreground">{t("library.redesignWelcome.feature1Title")}</span> — {t("library.redesignWelcome.feature1Desc")}</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="mt-0.5 text-primary">✦</span>
+                    <span className="text-foreground/80"><span className="font-medium text-foreground">{t("library.redesignWelcome.feature2Title")}</span> — {t("library.redesignWelcome.feature2Desc")}</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="mt-0.5 text-primary">✦</span>
+                    <span className="text-foreground/80"><span className="font-medium text-foreground">{t("library.redesignWelcome.feature3Title")}</span> — {t("library.redesignWelcome.feature3Desc")}</span>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => {
+                localStorage.setItem("library-redesign-welcome-shown", "true");
+                setShowRedesignDialog(false);
+              }}
+            >
+              {t("library.redesignWelcome.cta")}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
