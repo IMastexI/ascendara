@@ -1779,7 +1779,10 @@
     },
     "executableUpdated": "Executable updated successfully",
     "filters": {
-      "favorites": "Favorites",
+      "favorites": {
+        "empty": "You haven't favorited any games yet...",
+        "label": "Favorites"
+      },
       "onlineGames": "Online Games",
       "vrGames": "VR Games"
     },
@@ -1851,6 +1854,7 @@
       "required": "Folder name is required",
       "title": "New Folder"
     },
+    "noGamesFound": "No games found",
     "noResultsFound": "No results found. Be precise with your search.",
     "notPlayedYet": "Not played yet",
     "ofPlaytime": "on this game",
@@ -1871,6 +1875,7 @@
     "play": "Play",
     "playLater": {
       "addedOn": "Added",
+      "empty":"You haven't added any games here yet...",
       "badge": "Later",
       "download": "Download Now",
       "remove": "Remove from Play Later",

@@ -1110,7 +1110,7 @@ const Library = () => {
     },
     {
       id: "favorites",
-      label: t("library.filters.favorites") || "Favorites",
+      label: t("library.filters.favorites.label") || "Favorites",
       icon: <Heart className="h-4 w-4" />,
       count: favorites.length,
     },
@@ -1555,7 +1555,7 @@ const Library = () => {
                 <div className="flex flex-col items-center justify-center py-24 text-center">
                   <SquareLibrary className="mb-4 h-12 w-12 text-muted-foreground/30" />
                   <p className="text-sm text-muted-foreground">
-                    {activeTab === "favorites" ? (t("library.filters.favorites") + " — no games yet") : t("library.noGamesFound") || "No games found"}
+                    {activeTab === "favorites" ? (t("library.filters.favorites.empty")) : t("library.noGamesFound") || "No games found"}
                   </p>
                 </div>
               )}
