@@ -1770,7 +1770,7 @@ export default function DownloadPage() {
           style={{
             animation: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
           }}
-          onClick={() => navigate("/search")}
+          onClick={() => navigate(-1)}
         >
           {t("download.pressEscToGoBack")}
         </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, memo, useMemo } from "react";
+import React, { useState, useEffect, useContext, memo, useMemo, useRef } from "react";
 import { Outlet, useSearchParams, useLocation } from "react-router-dom";
 import Navigation from "./Navigation";
 import MenuBar from "./MenuBar";
@@ -6,6 +6,7 @@ import Tour from "./Tour";
 import PageTransition from "./PageTransition";
 import { useTheme } from "@/context/ThemeContext";
 import { SettingsContext } from "@/context/SettingsContext";
+import Search from "@/pages/Search";
 
 const Layout = memo(() => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -14,6 +15,8 @@ const Layout = memo(() => {
   const location = useLocation();
   const context = useContext(SettingsContext);
   const smoothTransitions = context?.settings?.smoothTransitions ?? true;
+  const isSearchPage = location.pathname === "/search";
+  const searchScrollRef = useRef(null);
 
   useEffect(() => {
     if (searchParams.get("tour") === "true") {
@@ -41,11 +44,24 @@ const Layout = memo(() => {
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <MenuBar className="fixed left-0 right-0 top-0 z-50" />
       <div className="h-8" />
-      <main className="flex-1 overflow-y-auto px-4 pb-24">
+      {/* Search is rendered persistently so scroll position and loaded games survive navigation */}
+      <main
+        ref={searchScrollRef}
+        className="flex-1 overflow-y-auto px-4 pb-24"
+        style={{ display: isSearchPage ? "block" : "none" }}
+      >
+        <Search scrollContainerRef={searchScrollRef} isVisible={isSearchPage} />
+        {showTour && isSearchPage && <Tour onClose={handleCloseTour} />}
+      </main>
+      {/* Other pages render normally via Outlet */}
+      <main
+        className="flex-1 overflow-y-auto px-4 pb-24"
+        style={{ display: isSearchPage ? "none" : "block" }}
+      >
         <PageTransition key={location.pathname}>
           <Outlet />
         </PageTransition>
-        {showTour && <Tour onClose={handleCloseTour} />}
+        {showTour && !isSearchPage && <Tour onClose={handleCloseTour} />}
       </main>
       <Navigation className="fixed bottom-0 left-0 right-0" />
     </div>

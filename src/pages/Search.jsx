@@ -164,7 +164,7 @@ const parseSizeToGB = (sizeStr) => {
   }
 };
 
-const Search = memo(() => {
+const Search = memo(({ scrollContainerRef, isVisible = true }) => {
   const { userData } = useAuth();
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -345,12 +345,14 @@ const Search = memo(() => {
 
   // Handle scroll to show/hide sticky search bar with throttling
   useEffect(() => {
+    if (!isVisible) return;
+    const container = scrollContainerRef?.current || window;
     let ticking = false;
 
     const handleScroll = () => {
       if (!ticking) {
         window.requestAnimationFrame(() => {
-          const scrollY = window.scrollY;
+          const scrollY = container === window ? window.scrollY : container.scrollTop;
           const shouldShow = scrollY > scrollThreshold;
 
           // Only update state if value actually changed
@@ -364,13 +366,14 @@ const Search = memo(() => {
       }
     };
 
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, [scrollThreshold]);
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [scrollThreshold, scrollContainerRef, isVisible]);
 
   // Handle sticky search click - scroll to top and focus input
   const handleStickySearchClick = useCallback(() => {
-    const startPosition = window.scrollY;
+    const container = scrollContainerRef?.current || window;
+    const startPosition = container === window ? window.scrollY : container.scrollTop;
     const duration = 600;
     const startTime = performance.now();
 
@@ -381,7 +384,12 @@ const Search = memo(() => {
       const progress = Math.min(elapsed / duration, 1);
       const easedProgress = easeOutCubic(progress);
 
-      window.scrollTo(0, startPosition * (1 - easedProgress));
+      const scrollPos = startPosition * (1 - easedProgress);
+      if (container === window) {
+        window.scrollTo(0, scrollPos);
+      } else {
+        container.scrollTop = scrollPos;
+      }
 
       if (progress < 1) {
         requestAnimationFrame(animateScroll);
@@ -391,7 +399,7 @@ const Search = memo(() => {
     };
 
     requestAnimationFrame(animateScroll);
-  }, []);
+  }, [scrollContainerRef]);
 
   const isCacheValid = useCallback(() => {
     return (
@@ -720,6 +728,7 @@ const Search = memo(() => {
   }, [displayedGames.length, filteredGames, gamesPerLoad, hasMore, isLoadingMore]);
 
   useEffect(() => {
+    if (!isVisible) return;
     const observer = new IntersectionObserver(
       entries => {
         if (entries[0].isIntersecting && !isLoadingMore && hasMore) {
@@ -737,7 +746,7 @@ const Search = memo(() => {
     }
 
     return () => observer.disconnect();
-  }, [loadMore, isLoadingMore, hasMore]);
+  }, [loadMore, isLoadingMore, hasMore, isVisible]);
 
   const handleDownload = useCallback(async game => {
     // Save the current search query when downloading a game

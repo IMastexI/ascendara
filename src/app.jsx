@@ -69,7 +69,7 @@ import Ascend from "./pages/Ascend";
 import Library from "./pages/Library";
 import FolderView from "./pages/FolderView";
 import LocalRefresh from "./pages/LocalRefresh";
-import Search from "./pages/Search";
+// Search is rendered persistently in Layout, not via Routes
 import Settings from "./pages/Settings";
 import Welcome from "./pages/Welcome";
 import i18n from "./i18n";
@@ -1782,7 +1782,7 @@ const AppRoutes = () => {
           <Route path="bigpicture" element={<BigPicture />} />
           <Route path="/" element={<Layout />}>
             <Route index element={<Home />} />
-            <Route path="search" element={<Search />} />
+            <Route path="search" element={null} />
             <Route path="library" element={<Library />} />
             <Route path="folderview/:folderName" element={<FolderView />} />
             <Route path="gamescreen" element={<GameScreen />} />
