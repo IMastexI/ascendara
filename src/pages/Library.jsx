@@ -3344,292 +3344,235 @@ const AddGameForm = ({ onSuccess }) => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div>
-          <div className="space-y-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full justify-start truncate bg-background text-left font-normal text-primary hover:bg-accent"
-              onClick={() => setShowImportDialog(true)}
-            >
-              <Import className="mr-2 h-4 w-4 flex-shrink-0" />
-              <span>{t("library.importSteamGames")}</span>
-            </Button>
-          </div>
+    <div className="space-y-4">
 
-          <Separator className="my-2" />
+      {/* ── Executable picker + Steam import ── */}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 flex-1 justify-start truncate text-left text-sm font-normal text-foreground hover:bg-accent"
+          onClick={handleChooseExecutable}
+        >
+          <FolderOpen className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate font-semibold text-muted-foreground">
+            {formData.executable
+              ? formData.executable.split("\\").pop()
+              : t("library.chooseExecutableFile")}
+          </span>
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 text-muted-foreground hover:bg-accent"
+          onClick={() => setShowImportDialog(true)}
+        >
+          <Import className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+          {t("library.importSteamGames")}
+        </Button>
+      </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-start truncate bg-background text-left font-normal text-primary hover:bg-accent"
-            onClick={handleChooseExecutable}
-          >
-            <FolderOpen className="mr-2 h-4 w-4 flex-shrink-0" />
-            <span className="truncate">
-              {formData.executable || t("library.chooseExecutableFile")}
-            </span>
-          </Button>
+      {/* ── Game name ── */}
+      <Input
+        id="name"
+        value={formData.name}
+        onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+        placeholder={t("library.gameName")}
+        className="h-9 bg-background text-sm"
+      />
 
-          {/* Import Steam Games Dialog */}
-          <AlertDialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle className="text-2xl font-bold text-foreground">
-                  {t("library.importSteamGames")}
-                </AlertDialogTitle>
-                <AlertDialogDescription className="text-foreground">
-                  <span>
-                    {t("library.importSteamGamesDescription")}{" "}
-                    <a
-                      className="cursor-pointer text-primary hover:underline"
-                      onClick={() =>
-                        window.electron.openURL(
-                          "https://ascendara.app/docs/features/overview#importing-from-steam"
-                        )
-                      }
-                    >
-                      {t("common.learnMore")}{" "}
-                      <ExternalLink className="mb-1 inline-block h-3 w-3" />
-                    </a>
-                  </span>
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <div className="space-y-2">
-                <Label htmlFor="steamapps-directory" className="text-foreground">
-                  {t("library.steamappsDirectory")}
-                </Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="steamapps-directory"
-                    value={steamappsDirectory}
-                    readOnly
-                    className="flex-1 border-input bg-background text-foreground"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleChooseSteamappsDirectory}
-                    className="bg-primary text-secondary"
-                  >
-                    {t("library.chooseDirectory")}
-                  </Button>
-                </div>
-                {isSteamappsDirectoryInvalid && (
-                  <div className="mt-1 text-sm font-semibold text-red-500">
-                    {t("library.steamappsDirectoryMissingCommon")}
-                  </div>
-                )}
-              </div>
-              <AlertDialogFooter>
-                <AlertDialogCancel
-                  onClick={() => setSteamappsDirectory("")}
-                  className="text-primary"
-                >
-                  {t("common.cancel")}
-                </AlertDialogCancel>
-                <Button
-                  type="button"
-                  onClick={handleImportSteamGames}
-                  disabled={!steamappsDirectory}
-                  className="bg-primary text-secondary"
-                >
-                  {t("library.import")}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
-
-        {/* Importing Dialog */}
-        <AlertDialog open={showImportingDialog}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="text-2xl font-bold text-foreground">
-                {importSuccess === null && (
-                  <>
-                    <Loader className="text-foreground-muted mr-2 inline h-5 w-5 animate-spin" />
-                    {t("library.importingGames")}
-                  </>
-                )}
-                {importSuccess === true && t("library.importSuccessTitle")}
-                {importSuccess === false && t("library.importFailedTitle")}
-              </AlertDialogTitle>
-              <AlertDialogDescription className="text-foreground">
-                {importSuccess === null && (
-                  <div className="flex items-center gap-2">
-                    {t("library.importingGamesDesc")}
-                  </div>
-                )}
-                {importSuccess === true && (
-                  <div className="text-foreground-muted">
-                    {t("library.importSuccessDesc")}
-                  </div>
-                )}
-                {importSuccess === false && (
-                  <div className="text-foreground-muted">
-                    {t("library.importFailedDesc")}
-                  </div>
-                )}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              {importSuccess !== null && (
-                <Button
-                  className="bg-primary text-secondary"
-                  onClick={handleCloseImportingDialog}
-                >
-                  {t("common.ok")}
-                </Button>
-              )}
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        <div className="space-y-2">
-          <Label htmlFor="name" className="text-foreground">
-            {t("library.gameName")}
-          </Label>
-          <Input
-            id="name"
-            value={formData.name}
-            onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            className="border-input bg-background text-foreground"
-          />
-        </div>
-
-        <Separator className="bg-border" />
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="hasVersion" className="flex-1 text-foreground">
-              {t("library.version")}
-            </Label>
-            <Switch
-              id="hasVersion"
-              checked={formData.hasVersion}
-              onCheckedChange={checked =>
-                setFormData(prev => ({
-                  ...prev,
-                  hasVersion: checked,
-                  version: !checked ? "" : prev.version,
-                }))
-              }
-            />
-          </div>
-
-          {formData.hasVersion && (
-            <Input
-              id="version"
-              value={formData.version}
-              onChange={e => setFormData(prev => ({ ...prev, version: e.target.value }))}
-              placeholder={t("library.versionPlaceholder")}
-              className="border-input bg-background text-foreground"
-            />
+      {/* ── Toggles row ── */}
+      <div className="grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          onClick={() => setFormData(prev => ({ ...prev, hasVersion: !prev.hasVersion, version: prev.hasVersion ? "" : prev.version }))}
+          className={cn(
+            "flex flex-col items-center gap-1 rounded-lg border px-3 py-2 text-xs transition-colors",
+            formData.hasVersion
+              ? "border-primary/50 bg-primary/10 text-primary"
+              : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
           )}
-        </div>
+        >
+          <Tag className="h-3.5 w-3.5" />
+          {t("library.version")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setFormData(prev => ({ ...prev, isOnline: !prev.isOnline }))}
+          className={cn(
+            "flex flex-col items-center gap-1 rounded-lg border px-3 py-2 text-xs transition-colors",
+            formData.isOnline
+              ? "border-primary/50 bg-primary/10 text-primary"
+              : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
+          )}
+        >
+          <Gamepad2 className="h-3.5 w-3.5" />
+          {t("library.hasOnlineFix")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setFormData(prev => ({ ...prev, hasDLC: !prev.hasDLC }))}
+          className={cn(
+            "flex flex-col items-center gap-1 rounded-lg border px-3 py-2 text-xs transition-colors",
+            formData.hasDLC
+              ? "border-primary/50 bg-primary/10 text-primary"
+              : "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
+          )}
+        >
+          <Gift className="h-3.5 w-3.5" />
+          {t("library.includesAllDLCs")}
+        </button>
+      </div>
 
-        <div className="flex items-center justify-between">
-          <Label htmlFor="isOnline" className="flex-1 text-foreground">
-            {t("library.hasOnlineFix")}
-          </Label>
-          <Switch
-            id="isOnline"
-            checked={formData.isOnline}
-            onCheckedChange={checked =>
-              setFormData(prev => ({ ...prev, isOnline: checked }))
-            }
-          />
-        </div>
+      {/* ── Version input (revealed when toggled) ── */}
+      {formData.hasVersion && (
+        <Input
+          id="version"
+          value={formData.version}
+          onChange={e => setFormData(prev => ({ ...prev, version: e.target.value }))}
+          placeholder={t("library.versionPlaceholder")}
+          className="h-9 bg-background text-sm"
+        />
+      )}
 
-        <div className="flex items-center justify-between">
-          <Label htmlFor="hasDLC" className="flex-1 text-foreground">
-            {t("library.includesAllDLCs")}
-          </Label>
-          <Switch
-            id="hasDLC"
-            checked={formData.hasDLC}
-            onCheckedChange={checked =>
-              setFormData(prev => ({ ...prev, hasDLC: checked }))
-            }
-          />
-        </div>
-
-        {/* Game Cover Search Section */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-grow">
-              <SearchIcon className="absolute left-2 top-1/2 h-4 w-4 -translate-y-2 transform text-muted-foreground" />
-              <Input
-                id="coverSearch"
-                value={coverSearch.query}
-                onChange={e => handleCoverSearch(e.target.value)}
-                className="border-input bg-background pl-8 text-foreground"
-                placeholder={t("library.searchGameCover")}
-                minLength={minSearchLength}
-              />
-            </div>
+      {/* ── Cover art search ── */}
+      <div className="flex gap-3">
+        <div className="flex-1 space-y-2">
+          <div className="relative">
+            <SearchIcon className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              id="coverSearch"
+              value={coverSearch.query}
+              onChange={e => handleCoverSearch(e.target.value)}
+              className="h-9 bg-background pl-8 text-sm"
+              placeholder={t("library.searchGameCover")}
+              minLength={minSearchLength}
+            />
           </div>
 
-          {/* Cover Search Results */}
           {coverSearch.query.length < minSearchLength ? (
-            <div className="py-2 text-center text-sm text-muted-foreground">
+            <p className="text-center text-xs text-muted-foreground">
               {t("library.enterMoreChars", { count: minSearchLength })}
-            </div>
+            </p>
           ) : coverSearch.isLoading ? (
-            <div className="flex justify-center py-4">
-              <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
+            <div className="flex justify-center py-3">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             </div>
           ) : coverSearch.results.length > 0 ? (
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-4 gap-2">
               {coverSearch.results.map((cover, index) => (
                 <div
                   key={index}
-                  onClick={() =>
-                    setCoverSearch(prev => ({ ...prev, selectedCover: cover }))
-                  }
+                  onClick={() => setCoverSearch(prev => ({ ...prev, selectedCover: cover }))}
                   className={cn(
-                    "relative aspect-video cursor-pointer overflow-hidden rounded-lg border-2 transition-all",
+                    "relative aspect-[3/4] cursor-pointer overflow-hidden rounded-md border-2 transition-all",
                     coverSearch.selectedCover === cover
-                      ? "border-primary shadow-lg"
-                      : "border-transparent hover:border-primary/50"
+                      ? "border-primary shadow-md"
+                      : "border-transparent hover:border-primary/40"
                   )}
                 >
-                  <img
-                    src={cover.img}
-                    alt={cover.title}
-                    className="h-full w-full object-cover"
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 transition-opacity hover:opacity-100">
-                    <p className="px-2 text-center text-sm text-white">{cover.title}</p>
-                  </div>
+                  <img src={cover.img} alt={cover.title} className="h-full w-full object-cover" />
+                  {coverSearch.selectedCover === cover && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                      <div className="rounded-full bg-primary p-1">
+                        <svg className="h-3 w-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           ) : (
-            <div className="py-2 text-center text-sm text-muted-foreground">
-              {t("library.noResultsFound")}
-            </div>
-          )}
-
-          {/* Selected Cover Preview */}
-          {coverSearch.selectedCover && (
-            <div className="mt-4 flex justify-center">
-              <div className="relative aspect-video w-64 overflow-hidden rounded-lg border-2 border-primary">
-                <img
-                  src={coverSearch.selectedCover.img}
-                  alt={coverSearch.selectedCover.title}
-                  className="h-full w-full object-cover"
-                />
-              </div>
-            </div>
+            <p className="text-center text-xs text-muted-foreground">{t("library.noResultsFound")}</p>
           )}
         </div>
+
+        {/* Selected cover preview */}
+        {coverSearch.selectedCover && (
+          <div className="relative aspect-[3/4] w-24 shrink-0 overflow-hidden rounded-lg border-2 border-primary shadow-md">
+            <img
+              src={coverSearch.selectedCover.img}
+              alt={coverSearch.selectedCover.title}
+              className="h-full w-full object-cover"
+            />
+          </div>
+        )}
       </div>
 
-      <AlertDialogFooter className="flex justify-end gap-2">
+      {/* ── Import Steam Games Dialog ── */}
+      <AlertDialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-bold text-foreground">
+              {t("library.importSteamGames")}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-foreground">
+              <span>
+                {t("library.importSteamGamesDescription")}{" "}
+                <a
+                  className="cursor-pointer text-primary hover:underline"
+                  onClick={() => window.electron.openURL("https://ascendara.app/docs/features/overview#importing-from-steam")}
+                >
+                  {t("common.learnMore")} <ExternalLink className="mb-1 inline-block h-3 w-3" />
+                </a>
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="steamapps-directory" className="text-foreground">
+              {t("library.steamappsDirectory")}
+            </Label>
+            <div className="flex gap-2">
+              <Input id="steamapps-directory" value={steamappsDirectory} readOnly className="flex-1 bg-background" />
+              <Button type="button" variant="outline" onClick={handleChooseSteamappsDirectory} className="bg-primary text-secondary">
+                {t("library.chooseDirectory")}
+              </Button>
+            </div>
+            {isSteamappsDirectoryInvalid && (
+              <p className="text-sm font-semibold text-destructive">{t("library.steamappsDirectoryMissingCommon")}</p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setSteamappsDirectory("")} className="text-primary">
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <Button type="button" onClick={handleImportSteamGames} disabled={!steamappsDirectory} className="bg-primary text-secondary">
+              {t("library.import")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Importing progress dialog ── */}
+      <AlertDialog open={showImportingDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-xl font-bold text-foreground">
+              {importSuccess === null && <><Loader className="mr-2 inline h-5 w-5 animate-spin text-muted-foreground" />{t("library.importingGames")}</>}
+              {importSuccess === true && t("library.importSuccessTitle")}
+              {importSuccess === false && t("library.importFailedTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-foreground">
+              {importSuccess === null && t("library.importingGamesDesc")}
+              {importSuccess === true && t("library.importSuccessDesc")}
+              {importSuccess === false && t("library.importFailedDesc")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            {importSuccess !== null && (
+              <Button className="bg-primary text-secondary" onClick={handleCloseImportingDialog}>
+                {t("common.ok")}
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Footer ── */}
+      <AlertDialogFooter>
         <Button variant="outline" onClick={() => onSuccess()} className="text-primary">
           {t("common.cancel")}
         </Button>
@@ -3640,10 +3583,7 @@ const AddGameForm = ({ onSuccess }) => {
           className="bg-primary text-secondary"
         >
           {isSubmitting ? (
-            <>
-              <Loader className="mr-2 h-4 w-4 animate-spin" />
-              {t("common.loading")}
-            </>
+            <><Loader className="mr-2 h-4 w-4 animate-spin" />{t("common.loading")}</>
           ) : (
             t("library.addGame.title")
           )}
