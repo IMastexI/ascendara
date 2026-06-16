@@ -456,15 +456,17 @@ class ChunkedDownloader:
         self.game_info["downloadingData"]["downloading"] = True
         safe_write_json(self.game_info_path, self.game_info)
     
-    def _stream_download(self, start_byte: int, file_handle) -> bool:
+    def _stream_download(self, start_byte: int, file_handle):
         """
         Stream download from start_byte, writing directly to file.
-        Returns True if completed successfully, False if interrupted.
+        Returns True if completed successfully, False if interrupted, or "restart"
+        if the local partial file must be discarded.
         """
         headers = {}
-        if start_byte > 0 and self.supports_range:
+        is_resume = start_byte > 0 and self.supports_range
+        if is_resume:
             headers['Range'] = f'bytes={start_byte}-'
-        
+
         try:
             response = self.session.get(
                 self.url,
@@ -472,41 +474,55 @@ class ChunkedDownloader:
                 stream=True,
                 timeout=(30, 300)  # 30s connect, 5min read timeout
             )
-            
+
             if response.status_code == 416:
-                # Range not satisfiable - file is complete
-                return True
-            
+                # Existing partial is invalid/too large/stale. Do not mark complete.
+                logging.warning(
+                    f"[ChunkedDownloader] Range not satisfiable at {read_size(start_byte)}; restarting download"
+                )
+                response.close()
+                return "restart"
+
+            if is_resume and response.status_code != 206:
+                # Critical corruption fix: if the host ignores Range and sends the
+                # entire file with 200 OK, appending it would corrupt the archive.
+                logging.warning(
+                    f"[ChunkedDownloader] Server ignored Range request. Expected 206, "
+                    f"got {response.status_code}; restarting instead of appending."
+                )
+                response.close()
+                return "restart"
+
             response.raise_for_status()
-            
-            # Try to get total size from Content-Range or Content-Length
-            if self.total_size is None:
-                if 'Content-Range' in response.headers:
-                    content_range = response.headers['Content-Range']
-                    if '/' in content_range:
-                        total_str = content_range.split('/')[-1]
-                        if total_str != '*':
-                            self.total_size = int(total_str)
-                            logging.info(f"[ChunkedDownloader] Got total size from Content-Range: {read_size(self.total_size)}")
-                elif 'Content-Length' in response.headers:
-                    content_length = int(response.headers['Content-Length'])
-                    self.total_size = start_byte + content_length
-                    logging.info(f"[ChunkedDownloader] Calculated total size: {read_size(self.total_size)}")
-            
-            # Use smaller chunks for precise throttling, larger chunks for full speed
+
+            # Prefer Content-Range for resumed responses. For fresh downloads, use Content-Length.
+            if 'Content-Range' in response.headers:
+                content_range = response.headers['Content-Range']
+                if '/' in content_range:
+                    total_str = content_range.split('/')[-1]
+                    if total_str != '*':
+                        self.total_size = int(total_str)
+                        logging.info(f"[ChunkedDownloader] Got total size from Content-Range: {read_size(self.total_size)}")
+            elif not is_resume and 'Content-Length' in response.headers:
+                self.total_size = int(response.headers['Content-Length'])
+                logging.info(f"[ChunkedDownloader] Got total size from Content-Length: {read_size(self.total_size)}")
+            elif self.total_size is None and 'Content-Length' in response.headers:
+                content_length = int(response.headers['Content-Length'])
+                self.total_size = start_byte + content_length
+                logging.info(f"[ChunkedDownloader] Calculated total size: {read_size(self.total_size)}")
+
             chunk_size = 4096 if self._speed_limit_bytes > 0 else self.STREAM_CHUNK_SIZE
             throttle_start = time.time()
             throttle_bytes = 0
-            # Stream the content
+
             for data in response.iter_content(chunk_size=chunk_size):
                 if data:
                     file_handle.write(data)
-                    file_handle.flush()  # Ensure data is written to disk
                     self.downloaded_bytes += len(data)
                     self.session_downloaded_bytes += len(data)
                     throttle_bytes += len(data)
                     self._update_progress()
-                    # Apply speed limit if configured
+
                     if self._speed_limit_bytes > 0:
                         elapsed = time.time() - throttle_start
                         if elapsed > 0:
@@ -515,29 +531,43 @@ class ChunkedDownloader:
                                 sleep_time = (throttle_bytes - allowed_bytes) / self._speed_limit_bytes
                                 if sleep_time > 0:
                                     time.sleep(sleep_time)
-            
+
+            file_handle.flush()
+            try:
+                os.fsync(file_handle.fileno())
+            except Exception:
+                pass
             return True
-            
+
         except Exception as e:
             logging.warning(f"[ChunkedDownloader] Stream interrupted at {read_size(self.downloaded_bytes)}: {e}")
             return False
-    
+
     def download(self) -> bool:
         """
         Download the file with streaming and automatic resume on failure.
         Returns True if successful, False otherwise.
         """
         try:
-            # Probe server for capabilities
             self._probe_server()
-            
-            # Check for existing partial download
             existing_size = self._get_existing_size()
-            
-            if self.total_size and existing_size >= self.total_size:
+
+            if self.total_size and existing_size == self.total_size:
                 logging.info(f"[ChunkedDownloader] File already complete: {read_size(existing_size)}")
+                self.downloaded_bytes = existing_size
                 return True
-            
+
+            if self.total_size and existing_size > self.total_size:
+                logging.warning(
+                    f"[ChunkedDownloader] Existing file is larger than expected "
+                    f"({read_size(existing_size)} > {read_size(self.total_size)}); deleting corrupt partial"
+                )
+                try:
+                    os.remove(self.dest_path)
+                except FileNotFoundError:
+                    pass
+                existing_size = 0
+
             if existing_size > 0 and self.supports_range:
                 logging.info(f"[ChunkedDownloader] Resuming from {read_size(existing_size)}")
                 self.downloaded_bytes = existing_size
@@ -546,73 +576,90 @@ class ChunkedDownloader:
                     logging.warning("[ChunkedDownloader] Server doesn't support range requests, starting fresh")
                     os.remove(self.dest_path)
                 self.downloaded_bytes = 0
-            
+
             self.start_time = time.time()
             retry_count = 0
             retry_delay = self.RETRY_DELAY_BASE
-            
-            # Retry loop - keeps trying until success or max retries
+
             while retry_count < self.MAX_RETRIES:
-                # Open file for writing/appending
                 mode = 'ab' if self.downloaded_bytes > 0 else 'wb'
-                
+
                 with open(self.dest_path, mode) as f:
-                    success = self._stream_download(self.downloaded_bytes, f)
-                
-                if success:
-                    # Check if download is complete
+                    stream_result = self._stream_download(self.downloaded_bytes, f)
+
+                if stream_result == "restart":
+                    try:
+                        if os.path.exists(self.dest_path):
+                            os.remove(self.dest_path)
+                    except Exception as e:
+                        logging.warning(f"[ChunkedDownloader] Could not delete invalid partial: {e}")
+                    self.downloaded_bytes = 0
+                    self.session_downloaded_bytes = 0
+                    retry_count += 1
+                    self.game_info["downloadingData"]["retryAttempt"] = retry_count
+                    safe_write_json(self.game_info_path, self.game_info)
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 1.5, self.RETRY_DELAY_MAX)
+                    self.session.close()
+                    self.session = create_robust_session()
+                    continue
+
+                if stream_result is True:
                     final_size = os.path.getsize(self.dest_path)
-                    
-                    # Debug logging to see exact values
-                    logging.info(f"[ChunkedDownloader] DEBUG: final_size={final_size}, total_size={self.total_size}, difference={abs(final_size - self.total_size) if self.total_size else 'N/A'}")
-                    
-                    # If stream completed successfully and we have a total_size, check completion
-                    # Allow small tolerance for size comparison (1KB) to handle edge cases
+                    logging.info(
+                        f"[ChunkedDownloader] DEBUG: final_size={final_size}, total_size={self.total_size}, "
+                        f"difference={abs(final_size - self.total_size) if self.total_size else 'N/A'}"
+                    )
+
                     if self.total_size is None:
-                        # No total size known - assume complete if stream finished
-                        logging.info(f"[ChunkedDownloader] Download complete: {read_size(final_size)}")
+                        logging.warning("[ChunkedDownloader] Total size unknown; accepting completed stream")
                         return True
-                    elif final_size >= self.total_size - 1024:
-                        # Download is complete (within 1KB tolerance)
-                        # Clear retry status
+
+                    if final_size == self.total_size:
                         if 'retryAttempt' in self.game_info.get('downloadingData', {}):
                             del self.game_info['downloadingData']['retryAttempt']
                             safe_write_json(self.game_info_path, self.game_info)
-                        
-                        # Final progress update
                         self._update_progress(force=True)
-                        
                         logging.info(f"[ChunkedDownloader] Download complete: {read_size(final_size)}")
                         return True
-                    else:
-                        # Partial download - continue
-                        logging.info(f"[ChunkedDownloader] Partial: {read_size(final_size)}/{read_size(self.total_size)}, continuing...")
-                        self.downloaded_bytes = final_size
+
+                    if final_size > self.total_size:
+                        logging.warning(
+                            f"[ChunkedDownloader] Downloaded file larger than expected "
+                            f"({read_size(final_size)} > {read_size(self.total_size)}); restarting"
+                        )
+                        try:
+                            os.remove(self.dest_path)
+                        except Exception as e:
+                            logging.warning(f"[ChunkedDownloader] Could not delete oversized file: {e}")
+                        self.downloaded_bytes = 0
+                        retry_count += 1
                         continue
-                
-                # Stream was interrupted - retry if we have range support
+
+                    logging.info(
+                        f"[ChunkedDownloader] Partial: {read_size(final_size)}/{read_size(self.total_size)}, continuing..."
+                    )
+                    self.downloaded_bytes = final_size
+                    continue
+
                 if not self.supports_range:
                     logging.error("[ChunkedDownloader] Download interrupted and server doesn't support resume")
                     return False
-                
+
                 retry_count += 1
                 self.downloaded_bytes = os.path.getsize(self.dest_path) if os.path.exists(self.dest_path) else 0
-                
-                # Update game info with retry status
                 self.game_info["downloadingData"]["retryAttempt"] = retry_count
                 safe_write_json(self.game_info_path, self.game_info)
-                
+
                 logging.info(f"[ChunkedDownloader] Retry {retry_count}/{self.MAX_RETRIES} in {retry_delay}s, resuming from {read_size(self.downloaded_bytes)}")
                 time.sleep(retry_delay)
                 retry_delay = min(retry_delay * 1.5, self.RETRY_DELAY_MAX)
-                
-                # Recreate session
                 self.session.close()
                 self.session = create_robust_session()
-            
+
             logging.error(f"[ChunkedDownloader] Max retries ({self.MAX_RETRIES}) exceeded")
             return False
-            
+
         except InterruptedError as e:
             logging.info(f"[ChunkedDownloader] Download interrupted: {e}")
             return False
