@@ -72,20 +72,22 @@ export const reorderQueue = (fromIndex, toIndex) => {
   return newQueue;
 };
 
-// Check if there are active downloads (excluding completed/verifying ones)
+// Check if there are active downloads (excluding completed/verifying/errored/stopped ones)
 export const hasActiveDownloads = async () => {
   try {
     const games = await window.electron.getGames();
     const activeDownloads = games.filter(game => {
       const { downloadingData } = game;
       // Only count as active if actually downloading, extracting, or updating
-      // Don't count verifying as active since that means it's almost done
+      // Don't count verifying, errored, or stopped downloads as active
       return (
         downloadingData &&
         (downloadingData.downloading ||
           downloadingData.extracting ||
           downloadingData.updating) &&
-        !downloadingData.verifying
+        !downloadingData.verifying &&
+        !downloadingData.error &&
+        !downloadingData.stopped
       );
     });
     return activeDownloads.length > 0;
@@ -95,8 +97,24 @@ export const hasActiveDownloads = async () => {
   }
 };
 
+// Lock to prevent concurrent processNextInQueue calls from starting the same download twice
+let _processingQueue = false;
+
 // Process the next item in the queue (called when a download completes)
 export const processNextInQueue = async () => {
+  if (_processingQueue) {
+    return null;
+  }
+  _processingQueue = true;
+
+  try {
+    return await _processNextInQueueInternal();
+  } finally {
+    _processingQueue = false;
+  }
+};
+
+const _processNextInQueueInternal = async () => {
   const nextItem = getNextInQueue();
   if (!nextItem) {
     return null;
