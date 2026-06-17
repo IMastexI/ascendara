@@ -492,6 +492,7 @@ const Home = memo(() => {
   const [autoPlay, setAutoPlay] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const [carouselImages, setCarouselImages] = useState({});
+  const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [recentGames, setRecentGames] = useState([]);
   const [touchStart, setTouchStart] = useState(0);
   const [touchEnd, setTouchEnd] = useState(0);
@@ -691,6 +692,9 @@ const Home = memo(() => {
       carouselGamesCache = null;
       // Clear gameService memory cache
       gameService.clearMemoryCache();
+      // Clear cached carousel images so they re-fetch from the new index
+      setCarouselImages({});
+      setImageRefreshKey(k => k + 1);
       loadGames(true);
     };
 
@@ -743,7 +747,7 @@ const Home = memo(() => {
     };
 
     loadCarouselImages();
-  }, [carouselGames.length, currentSlide]);
+  }, [carouselGames.length, currentSlide, imageRefreshKey]);
 
   // Initial load - preload all carousel images for smooth transitions
   useEffect(() => {
@@ -774,7 +778,7 @@ const Home = memo(() => {
     // Delay preloading to not block initial render
     const timer = setTimeout(preloadAllCarouselImages, 1000);
     return () => clearTimeout(timer);
-  }, [carouselGames.length]);
+  }, [carouselGames.length, imageRefreshKey]);
 
   useEffect(() => {
     const updateRecentGames = async () => {
@@ -785,7 +789,7 @@ const Home = memo(() => {
     if (installedGames.length > 0 || apiGames.length > 0) {
       updateRecentGames();
     }
-  }, [installedGames.length, apiGames.length]);
+  }, [installedGames.length, apiGames]);
 
   useEffect(() => {
     // Only recalculate sections when apiGames actually changes
@@ -808,7 +812,7 @@ const Home = memo(() => {
     setOnlineGames(onlineSection);
     setActionGames(actionSection);
     setPopularCategories(popularCats);
-  }, [apiGames.length]);
+  }, [apiGames]);
 
   const getGameSections = games => {
     if (!Array.isArray(games))
