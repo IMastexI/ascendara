@@ -1728,6 +1728,7 @@
     "clickToUpload": "Click to Upload",
     "cloudOnly": {
       "badge": "Cloud",
+      "empty": "No cloud games found",
       "customBadge": "Custom",
       "noFilesFound": "No local files found for this game. Click \"Download & Restore\" to install it and recover your cloud playtime.",
       "noFilesFoundCustom": "No local files found for this custom game. Click \"Add & Restore\" to re-add it and recover your cloud playtime.",

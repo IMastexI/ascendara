@@ -112,6 +112,91 @@ import {
 // Module-level cache so images survive page switches without re-fetching via IPC
 const gameImageCache = new Map();
 
+
+// Normalize every place that compares game names so casing, spaces, and
+// filesystem-invalid characters cannot create duplicate library entries.
+const normalizeGameName = name =>
+  (name || "")
+    .replace(/[<>:"/\\|?*]/g, "")
+    .trim()
+    .toLowerCase();
+
+const getGameDisplayName = game => game?.game || game?.name || "";
+
+const getLibraryIdentityKey = game => {
+  const normalizedName = normalizeGameName(getGameDisplayName(game));
+  if (game?.isFolder && normalizedName) return `folder:${normalizedName}`;
+  if (normalizedName) return `name:${normalizedName}`;
+  if (game?.gameID) return `id:${game.gameID}`;
+  if (game?._queueId) return `queued:${game._queueId}`;
+  return "";
+};
+
+const toFiniteNumber = value => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+};
+
+const getComparableTime = value => {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsedAsNumber = Number(value);
+  if (Number.isFinite(parsedAsNumber)) return parsedAsNumber;
+  const parsedAsDate = Date.parse(value);
+  return Number.isFinite(parsedAsDate) ? parsedAsDate : 0;
+};
+
+const pickMostRecentValue = (a, b) =>
+  getComparableTime(b) > getComparableTime(a) ? b : a;
+
+const mergeDuplicateLibraryGame = (existing, incoming) => {
+  const existingIsInstalled = existing?.isCustom === false || existing?.custom === false;
+  const incomingIsInstalled = incoming?.isCustom === false || incoming?.custom === false;
+
+  // Prefer installed-game metadata over custom-game metadata, but keep the
+  // highest stats so the user's hours do not disappear when duplicates merge.
+  const preferred = incomingIsInstalled && !existingIsInstalled ? incoming : existing;
+  const secondary = preferred === existing ? incoming : existing;
+
+  return {
+    ...secondary,
+    ...preferred,
+    game: getGameDisplayName(preferred) || getGameDisplayName(secondary),
+    name: preferred?.name || preferred?.game || secondary?.name || secondary?.game,
+    playTime: Math.max(
+      toFiniteNumber(existing?.playTime),
+      toFiniteNumber(incoming?.playTime)
+    ),
+    launchCount: Math.max(
+      toFiniteNumber(existing?.launchCount),
+      toFiniteNumber(incoming?.launchCount)
+    ),
+    lastPlayed: pickMostRecentValue(existing?.lastPlayed, incoming?.lastPlayed),
+    _isDownloading: Boolean(existing?._isDownloading || incoming?._isDownloading),
+    _isQueued: Boolean(existing?._isQueued || incoming?._isQueued),
+  };
+};
+
+const dedupeLibraryGames = gameList => {
+  const deduped = new Map();
+
+  for (const [index, game] of (gameList || []).entries()) {
+    const identityKey = getLibraryIdentityKey(game) || `unknown:${index}`;
+
+    const existing = deduped.get(identityKey);
+    deduped.set(
+      identityKey,
+      existing ? mergeDuplicateLibraryGame(existing, game) : game
+    );
+  }
+
+  return Array.from(deduped.values());
+};
+
+const getLibraryCardKey = game =>
+  getLibraryIdentityKey(game) ||
+  `library-item:${game?.executable || game?.path || game?.installPath || "unknown"}`;
+
 const Library = () => {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedGames, setSelectedGames] = useState([]);
@@ -327,18 +412,15 @@ const Library = () => {
     lastLaunchedGameRef.current = lastLaunchedGame;
   }, [lastLaunchedGame]);
 
-  const [currentPage, setCurrentPage] = useState(() => {
-    const statePage = Number(location?.state?.libraryPage);
-    // // //
-    return Number.isInteger(statePage) && statePage >= 1 ? statePage : 1;
-  });
-
-  const PAGE_SIZE = 15;
-
-  // Merge queued stubs into the display list (skip if already showing as downloading)
-  const existingGameNames = new Set(games.map(g => g.game || g.name));
+  // Merge queued stubs into the display list (skip if already showing locally).
+  // Compare normalized names so "Game", " game ", and sanitized folder names do not duplicate.
+  const existingGameNames = new Set(
+    games
+      .filter(g => !g.isFolder)
+      .map(g => normalizeGameName(g.game || g.name))
+  );
   const queuedStubs = queuedGames
-    .filter(q => !existingGameNames.has(q.gameName))
+    .filter(q => !existingGameNames.has(normalizeGameName(q.gameName)))
     .map(q => ({
       game: q.gameName,
       name: q.gameName,
@@ -347,7 +429,7 @@ const Library = () => {
       _isQueued: true,
       _queueId: q.id,
     }));
-  const gamesWithQueued = [...games, ...queuedStubs];
+  const gamesWithQueued = dedupeLibraryGames([...games, ...queuedStubs]);
 
   // Filter games based on search query
   const filteredGames = gamesWithQueued
@@ -400,13 +482,6 @@ const Library = () => {
     safeSetItem("library-sortMode", sortMode);
   }, [sortMode]);
 
-  // Pagination logic
-  const totalPages = Math.ceil(filteredGames.length / PAGE_SIZE);
-  const paginatedGames = filteredGames.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
-
   // Listen for folder changes (e.g. folder deleted, games moved back)
   useEffect(() => {
     const handleFoldersUpdated = () => {
@@ -417,18 +492,6 @@ const Library = () => {
       window.removeEventListener("ascendara:folders-updated", handleFoldersUpdated);
     };
   }, []);
-
-  // Scroll to top when page changes
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [currentPage]);
-
-  // Keep current page in range. Avoid resetting during initial load when totalPages is 0.
-  useEffect(() => {
-    if (totalPages > 0 && currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
 
   const toggleFavorite = gameName => {
     setFavorites(prev => {
@@ -980,8 +1043,12 @@ const Library = () => {
         isFolder: true,
       }));
 
+      // Remove duplicate records before rendering. Large libraries can return the
+      // same title from installed + custom/imported sources with different stats.
+      const dedupedGames = dedupeLibraryGames(allGames);
+
       // Filter out games that are in folders using the folderManager library
-      const gamesNotInFolders = filterGamesNotInFolders(allGames);
+      const gamesNotInFolders = filterGamesNotInFolders(dedupedGames);
 
       // Set the folders state
       setFolders(folders);
@@ -1079,7 +1146,6 @@ const Library = () => {
     navigate("/gamescreen", {
       state: {
         gameData: game,
-        libraryPage: currentPage,
       },
     });
   };
@@ -1197,9 +1263,6 @@ const Library = () => {
   const tabGames = activeTab === "favorites"
     ? filteredGames.filter(g => !g.isFolder && favorites.includes(g.game || g.name))
     : filteredGames;
-
-  const tabTotalPages = Math.ceil(tabGames.length / PAGE_SIZE);
-  const tabPaginatedGames = tabGames.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const sidebarTabs = [
     {
@@ -1378,7 +1441,7 @@ const Library = () => {
                 </div>
 
                 <button
-                  onClick={() => { setActiveTab(tab.id); setCurrentPage(1); }}
+                  onClick={() => { setActiveTab(tab.id); }}
                   className={cn(
                     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-all",
                     activeTab === tab.id
@@ -1595,7 +1658,7 @@ const Library = () => {
               value={searchQuery}
               onChange={e => {
                 setSearchQuery(e.target.value);
-                if (e.target.value && activeTab !== "all") { setActiveTab("all"); setCurrentPage(1); }
+                if (e.target.value && activeTab !== "all") { setActiveTab("all"); }
               }}
               className="h-9 pl-9"
             />
@@ -1778,7 +1841,7 @@ const Library = () => {
           {/* ── All Games / Favorites tab ── */}
           {(activeTab === "all" || activeTab === "favorites") && (() => {
             const renderGameCard = game => (
-              <div key={game.game || game.name}>
+              <div key={getLibraryCardKey(game)}>
                 {game.isFolder ? (
                   <DroppableFolderCard
                     folder={game}
@@ -1827,7 +1890,7 @@ const Library = () => {
             const gridClass = "grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6";
 
             if (groupBy === "directory") {
-              // Build directory groups from all filtered games (not paginated) so each section is complete
+              // Build directory groups from all filtered games so each section is complete
               const dirGroups = new Map();
               tabGames.forEach(game => {
                 const dir = game._sourceDir || t("library.sort.addedGames");
@@ -1864,38 +1927,22 @@ const Library = () => {
             }
 
             return (
-              <>
-                <DndProvider backend={HTML5Backend}>
-                  <div className={gridClass}>
-                    {tabPaginatedGames
-                      .sort((a, b) => (a.isFolder === b.isFolder ? 0 : a.isFolder ? -1 : 1))
-                      .map(renderGameCard)}
-                  </div>
-                </DndProvider>
-
-                {tabPaginatedGames.length === 0 && (
+              <DndProvider backend={HTML5Backend}>
+                {tabGames.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-24 text-center">
                     <SquareLibrary className="mb-4 h-12 w-12 text-muted-foreground/30" />
                     <p className="text-sm text-muted-foreground">
                       {activeTab === "favorites" ? (t("library.filters.favorites.empty")) : t("library.noGamesFound") || "No games found"}
                     </p>
                   </div>
-                )}
-
-                {tabTotalPages > 1 && (
-                  <div className="mt-6 flex items-center justify-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>
-                      {t("common.prev")}
-                    </Button>
-                    <span className="px-3 text-sm text-muted-foreground">
-                      {t("common.page")} {currentPage} / {tabTotalPages}
-                    </span>
-                    <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(tabTotalPages, p + 1))} disabled={currentPage === tabTotalPages}>
-                      {t("common.next")}
-                    </Button>
+                ) : (
+                  <div className={gridClass}>
+                    {tabGames
+                      .sort((a, b) => (a.isFolder === b.isFolder ? 0 : a.isFolder ? -1 : 1))
+                      .map(renderGameCard)}
                   </div>
                 )}
-              </>
+              </DndProvider>
             );
           })()}
 
@@ -1915,7 +1962,7 @@ const Library = () => {
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                   {cloudOnlyGames.map(game => (
                     <CloudOnlyGameCard
-                      key={game.name}
+                      key={getLibraryCardKey(game)}
                       game={game}
                       imageData={cloudGameImages[game.name]}
                       onRestore={() => handleRestoreFromCloud(game)}
@@ -1939,7 +1986,7 @@ const Library = () => {
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                   {playLaterGames.map(game => (
                     <PlayLaterGameCard
-                      key={game.game}
+                      key={getLibraryCardKey(game)}
                       game={game}
                       onDownload={() => handleDownloadPlayLater(game)}
                       onRemove={() => handleRemoveFromPlayLater(game.game)}
@@ -2114,7 +2161,7 @@ const Library = () => {
                   <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                     {sorted.map(game => (
                       <FavoritesGalleryCard
-                        key={game.game || game.name}
+                        key={getLibraryCardKey(game)}
                         game={game}
                         rating={gameRatings[game.game || game.name] || 0}
                         onRate={rating => setGameRating(game.game || game.name, rating)}
@@ -4071,8 +4118,9 @@ const AddGameForm = ({ onSuccess }) => {
 
       const allExistingGames = [...(installedGames || []), ...(customGames || [])];
 
+      const normalizedFormName = normalizeGameName(formData.name);
       const gameExists = allExistingGames.some(
-        game => (game.game || game.name)?.toLowerCase() === formData.name.toLowerCase()
+        game => normalizeGameName(game.game || game.name) === normalizedFormName
       );
 
       console.log("[AddGameForm] Duplicate check result:", {
@@ -4454,8 +4502,12 @@ const DroppableFolderCard = ({ folder, onDropGame, children }) => {
       if (onDropGame) onDropGame(item);
     },
     canDrop: item => {
-      // Prevent dropping a game that's already in this folder
-      return !folder.items?.some(g => (g.game || g.name) === (item.game || item.name));
+      // Prevent dropping a game that's already in this folder, even if casing or
+      // filesystem sanitization differs.
+      const droppedName = normalizeGameName(item.game || item.name);
+      return !folder.items?.some(
+        g => normalizeGameName(g.game || g.name) === droppedName
+      );
     },
     collect: monitor => ({
       isOver: monitor.isOver(),
