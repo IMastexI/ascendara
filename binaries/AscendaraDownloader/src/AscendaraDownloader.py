@@ -1434,45 +1434,33 @@ class AscendaraDownloader:
             
             logging.info(f"[AscendaraDownloader] Extracting {len(members_to_extract)} files (filtered from {len(zip_contents)})")
             
-            # Use extractall() for dramatically faster extraction (10-100x faster than file-by-file)
-            # Try without password first; fall back to steamrip.com password for encrypted archives.
-            try:
-                zip_ref.extractall(extract_to or self.download_dir, members=members_to_extract)
-                logging.info(f"[AscendaraDownloader] Bulk extraction complete")
-            except RuntimeError as e:
-                if 'password' in str(e).lower() or 'encrypted' in str(e).lower():
-                    logging.info(f"[AscendaraDownloader] ZIP is encrypted, retrying with steamrip.com password")
-                    try:
-                        zip_ref.extractall(extract_to or self.download_dir, members=members_to_extract, pwd=b'steamrip.com')
-                        logging.info(f"[AscendaraDownloader] Bulk extraction complete (with password)")
-                    except Exception as e2:
-                        logging.error(f"[AscendaraDownloader] Bulk extraction failed with password: {e2}")
-                        raise
-                else:
-                    logging.error(f"[AscendaraDownloader] Bulk extraction failed: {e}")
-                    raise
-            except Exception as e:
-                logging.error(f"[AscendaraDownloader] Bulk extraction failed: {e}")
-                raise
-            
-            # Build watching data and update progress after extraction
+            # Extract file-by-file instead of extractall().
+            # Bulk extractall() is faster, but the UI sits on "Preparing..." until the archive is fully done.
+            # File-by-file extraction restores live extraction progress for users.
+            _et = extract_to or self.download_dir
             for zip_info in members_to_extract:
-                # Only process actual files, not directories
-                if not zip_info.is_dir():
-                    _et = extract_to or self.download_dir
-                    extracted_path = os.path.join(_et, zip_info.filename)
-                    key = os.path.relpath(extracted_path, self.download_dir)
-                    watching_data[key] = {"size": zip_info.file_size}
-                    
-                    self._files_extracted_count += 1
-                    # Cap the count to never exceed total
-                    if self._files_extracted_count > self._total_files_to_extract:
-                        logging.warning(f"[AscendaraDownloader] Extracted count ({self._files_extracted_count}) exceeds total ({self._total_files_to_extract}), capping")
-                        self._files_extracted_count = self._total_files_to_extract
-                    
-                    # Update progress more frequently: first 10 files (every file), then every 50 files, or at completion
-                    if self._files_extracted_count <= 10 or self._files_extracted_count % 50 == 0 or self._files_extracted_count == self._total_files_to_extract:
-                        self._update_extraction_progress(zip_info.filename, self._files_extracted_count, self._total_files_to_extract)
+                if zip_info.is_dir():
+                    continue
+
+                try:
+                    zip_ref.extract(zip_info, _et)
+                except RuntimeError as e:
+                    if 'password' in str(e).lower() or 'encrypted' in str(e).lower():
+                        zip_ref.extract(zip_info, _et, pwd=b'steamrip.com')
+                    else:
+                        raise
+
+                extracted_path = os.path.join(_et, zip_info.filename)
+                key = os.path.relpath(extracted_path, self.download_dir).replace('\\', '/')
+                watching_data[key] = {"size": zip_info.file_size}
+
+                self._files_extracted_count += 1
+                if self._files_extracted_count > self._total_files_to_extract:
+                    logging.warning(f"[AscendaraDownloader] Extracted count ({self._files_extracted_count}) exceeds total ({self._total_files_to_extract}), capping")
+                    self._files_extracted_count = self._total_files_to_extract
+
+                # Force progress writes so the app does not stay stuck on "Preparing..." during large archives.
+                self._update_extraction_progress(zip_info.filename, self._files_extracted_count, self._total_files_to_extract, force=True)
     
     def _extract_rar(self, archive_path: str, watching_data: Dict, extract_to: str = None):
         """Extract a RAR file using Python unrar library (Windows) or system unrar binary (Linux/macOS)."""
@@ -1761,9 +1749,10 @@ class AscendaraDownloader:
             
             dest_dir = extract_to or self.download_dir
             
-            # For archives with many files, use fast bulk extraction to avoid threading overhead
-            # This is 5-10x faster than file-by-file extraction
-            if len(rar_files) > 100:
+            # Bulk extraction is intentionally disabled because it prevents live UI progress updates.
+            # File-by-file extraction is slower, but it keeps extractionProgress moving instead of staying on "Preparing...".
+            USE_BULK_RAR_EXTRACTION = False
+            if USE_BULK_RAR_EXTRACTION and len(rar_files) > 100:
                 logging.info(f"[AscendaraDownloader] Using fast bulk extraction for {len(rar_files)} files")
                 try:
                     # Extract all files at once (much faster)
