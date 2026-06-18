@@ -34,6 +34,49 @@ import re
 from datetime import datetime
 import zipfile
 
+
+# Sleep Prevention
+
+
+_caffeinate_proc = None
+
+def prevent_sleep():
+    """Prevent the system from sleeping while a download is active."""
+    global _caffeinate_proc
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            ES_CONTINUOUS      = 0x80000000
+            ES_SYSTEM_REQUIRED = 0x00000001
+            ctypes.windll.kernel32.SetThreadExecutionState(
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+            )
+            logging.info("[AscendaraGofileHelper] Sleep prevention enabled")
+        elif sys.platform == 'darwin':
+            _caffeinate_proc = subprocess.Popen(
+                ['caffeinate', '-s'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            logging.info("[AscendaraGofileHelper] Sleep prevention enabled (caffeinate)")
+    except Exception as e:
+        logging.warning(f"[AscendaraGofileHelper] Could not enable sleep prevention: {e}")
+
+def allow_sleep():
+    """Re-allow the system to sleep after download is complete."""
+    global _caffeinate_proc
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            ES_CONTINUOUS = 0x80000000
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+            logging.info("[AscendaraGofileHelper] Sleep prevention disabled")
+        elif sys.platform == 'darwin' and _caffeinate_proc is not None:
+            _caffeinate_proc.terminate()
+            _caffeinate_proc = None
+            logging.info("[AscendaraGofileHelper] Sleep prevention disabled (caffeinate stopped)")
+    except Exception as e:
+        logging.warning(f"[AscendaraGofileHelper] Could not disable sleep prevention: {e}")
+
 def get_ascendara_log_path():
     if sys.platform == "win32":
         appdata = os.getenv("APPDATA")
@@ -423,10 +466,12 @@ class GofileDownloader:
         raise Exception("Account creation failed after all retries")
 
     def download_from_gofile(self, url, password=None, withNotification=None):
+        prevent_sleep()
         # Get token now that JSON file is created
         try:
             self._token = self._getToken()
         except Exception as e:
+            allow_sleep()
             error_str = str(e)
             # Check if it's a rate limit error
             if "RATE_LIMIT:" in error_str or "error-rateLimit" in error_str:
@@ -461,6 +506,7 @@ class GofileDownloader:
         if not files_info:
             logging.error(f"[AscendaraGofileHelper] No files found for download from {url}. Skipping...")
             handleerror(self.game_info, self.game_info_path, "no_files_error")
+            allow_sleep()
             return
         
         logging.info(f"[AscendaraGofileHelper] Successfully discovered {len(files_info)} files to download")
@@ -527,10 +573,11 @@ class GofileDownloader:
                     "Download Complete",
                     f"Successfully {'updated' if self.updateFlow else 'downloaded'} {self.game_info['game']}"
                 )
+            allow_sleep()
                 
         except InterruptedError as e:
             logging.info(f"[AscendaraGofileHelper] Download interrupted: {e}")
-            # Don't mark as error - just stop cleanly
+            allow_sleep()
             return
         except Exception as e:
             logging.error(f"[AscendaraGofileHelper] Error during download process: {str(e)}")
@@ -542,6 +589,7 @@ class GofileDownloader:
                     "Download Error",
                     f"Error {'updating' if self.updateFlow else 'downloading'} {self.game_info['game']}: {str(e)}"
                 )
+            allow_sleep()
             raise
 
     def _parseLinksRecursively(self, content_id, password, current_path=""):

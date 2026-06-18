@@ -35,6 +35,49 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
+# Sleep Prevention
+
+
+_caffeinate_proc = None
+
+def prevent_sleep():
+    """Prevent the system from sleeping while a download is active."""
+    global _caffeinate_proc
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            ES_CONTINUOUS        = 0x80000000
+            ES_SYSTEM_REQUIRED   = 0x00000001
+            ctypes.windll.kernel32.SetThreadExecutionState(
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+            )
+            logging.info("[AscendaraDownloader] Sleep prevention enabled")
+        elif sys.platform == 'darwin':
+            _caffeinate_proc = subprocess.Popen(
+                ['caffeinate', '-s'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            logging.info("[AscendaraDownloader] Sleep prevention enabled (caffeinate)")
+    except Exception as e:
+        logging.warning(f"[AscendaraDownloader] Could not enable sleep prevention: {e}")
+
+def allow_sleep():
+    """Re-allow the system to sleep after download is complete."""
+    global _caffeinate_proc
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            ES_CONTINUOUS = 0x80000000
+            ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
+            logging.info("[AscendaraDownloader] Sleep prevention disabled")
+        elif sys.platform == 'darwin' and _caffeinate_proc is not None:
+            _caffeinate_proc.terminate()
+            _caffeinate_proc = None
+            logging.info("[AscendaraDownloader] Sleep prevention disabled (caffeinate stopped)")
+    except Exception as e:
+        logging.warning(f"[AscendaraDownloader] Could not disable sleep prevention: {e}")
+
+
 # Logging Setup
 
 
@@ -782,7 +825,7 @@ class AscendaraDownloader:
     def download(self, url: str, withNotification: Optional[str] = None):
         """Main download entry point."""
         self.withNotification = withNotification
-        
+        prevent_sleep()
         try:
             # Check for Buzzheavier URLs
             if any(domain in url for domain in self.VALID_BUZZHEAVIER_DOMAINS):
@@ -866,6 +909,8 @@ class AscendaraDownloader:
             
             if withNotification:
                 _launch_notification(withNotification, "Download Error", f"Error downloading {self.game}: {e}")
+        finally:
+            allow_sleep()
     
     def _create_update_backup(self) -> Optional[str]:
         """Create a backup of existing game files before updating.
@@ -2297,6 +2342,7 @@ class AscendaraDownloader:
     
     def _handle_post_download_behavior(self):
         """Handle post-download actions like lock, sleep, shutdown."""
+        allow_sleep()
         try:
             settings = load_settings()
             behavior = settings.get('behaviorAfterDownload', 'none')
