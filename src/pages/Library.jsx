@@ -312,6 +312,7 @@ const Library = () => {
   const [friends, setFriends] = useState([]);
   const [friendsLoaded, setFriendsLoaded] = useState(false);
   const [showRedesignDialog, setShowRedesignDialog] = useState(false);
+  const [addGameRestoreEntry, setAddGameRestoreEntry] = useState(null); // {gameName, stub}
 
   useEffect(() => {
     safeSetItem("game-favorites", JSON.stringify(favorites));
@@ -743,7 +744,7 @@ const Library = () => {
           
           const localGameNames = new Set([
             ...(installedGames || []).map(g => sanitizeName(g.game || g.name)),
-            ...(customGames || []).map(g => sanitizeName(g.game || g.name)),
+            ...(customGames || []).filter(g => !g._isDeleted).map(g => sanitizeName(g.game || g.name)),
           ]);
 
           // Filter to cloud games that are NOT installed locally
@@ -993,7 +994,9 @@ const Library = () => {
 
       // Ensure we have arrays to work with
       const safeInstalledGames = Array.isArray(installedGames) ? installedGames : [];
-      const safeCustomGames = Array.isArray(customGames) ? customGames : [];
+      const safeCustomGames = Array.isArray(customGames)
+        ? customGames.filter(g => !g._isDeleted)
+        : [];
 
       // Check for pending cloud restores (games that were downloaded from cloud)
       await checkPendingCloudRestores([...safeInstalledGames, ...safeCustomGames]);
@@ -1078,7 +1081,7 @@ const Library = () => {
         ...(installedGames || []).filter(
           g => !g.downloadingData?.downloading && !g.downloadingData?.extracting
         ),
-        ...(customGames || []).map(g => ({ ...g, isCustom: true })),
+        ...(customGames || []).filter(g => !g._isDeleted).map(g => ({ ...g, isCustom: true })),
       ];
 
       const gamesWithAchievements = await Promise.all(
@@ -1497,6 +1500,7 @@ const Library = () => {
                 </AlertDialogHeader>
                 <div className="max-h-[60vh] overflow-y-auto py-4">
                   <AddGameForm
+                    onRestorePrompt={entry => setAddGameRestoreEntry(entry)}
                     onSuccess={() => {
                       setIsAddGameOpen(false);
                       setSelectedGameImage(null);
@@ -2415,6 +2419,56 @@ const Library = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Restore Game Data Dialog (for re-added custom games) ── */}
+      {addGameRestoreEntry && (() => {
+        const { gameName, stub } = addGameRestoreEntry;
+        const secs = stub?.playTime || 0;
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const playtimeLabel = secs > 60 ? (h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`) : null;
+        return (
+          <AlertDialog open onOpenChange={() => {}}>
+            <AlertDialogContent className="sm:max-w-[440px]">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-xl font-bold text-foreground">
+                  {t("library.restoreGameDataTitle")}
+                </AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-3 pt-1">
+                    <p className="text-sm text-muted-foreground">
+                      {t("library.restoreGameDataDescription", { game: gameName })}
+                    </p>
+                    {playtimeLabel && (
+                      <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+                        <Timer className="h-4 w-4 shrink-0 text-primary" />
+                        <span className="text-foreground/80">
+                          <span className="font-medium text-foreground">{playtimeLabel}</span> of playtime saved
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="flex gap-2">
+                <Button variant="outline" className="text-primary" onClick={async () => {
+                  try { await window.electron.discardDeletedGameData(gameName); } catch (e) {}
+                  setAddGameRestoreEntry(null);
+                }}>
+                  {t("library.restoreGameDataNo")}
+                </Button>
+                <Button className="text-secondary" onClick={async () => {
+                  try { await window.electron.restoreDeletedGameData(gameName); } catch (e) {}
+                  setAddGameRestoreEntry(null);
+                  await loadGames();
+                }}>
+                  {t("library.restoreGameDataYes")}
+                </Button>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        );
+      })()}
     </div>
   );
 };
@@ -2485,6 +2539,7 @@ const FavoritesGalleryCard = memo(({ game, rating, onRate, onPlay, onDownload, o
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isSaveDataDialogOpen, setIsSaveDataDialogOpen] = useState(false);
   const [isUninstalling, setIsUninstalling] = useState(false);
 
   const handleContextMenu = e => {
@@ -2500,17 +2555,29 @@ const FavoritesGalleryCard = memo(({ game, rating, onRate, onPlay, onDownload, o
     setContextMenuOpen(true);
   };
 
-  const confirmDelete = async () => {
+  const confirmDelete = () => {
+    setIsDeleteDialogOpen(false);
+    if (!game.isCustom) {
+      setIsSaveDataDialogOpen(true);
+    } else {
+      performDelete(false);
+    }
+  };
+
+  const performDelete = async (saveData) => {
     try {
       setIsUninstalling(true);
       const gameId = game.game || game.name;
+      if (saveData) {
+        await window.electron.saveDeletedGameData(gameId);
+      }
       if (game.isCustom) {
         await window.electron.removeCustomGame(gameId);
       } else {
         await window.electron.deleteGame(gameId);
       }
       setIsUninstalling(false);
-      setIsDeleteDialogOpen(false);
+      setIsSaveDataDialogOpen(false);
       window.location.reload();
     } catch {
       setIsUninstalling(false);
@@ -2624,6 +2691,33 @@ const FavoritesGalleryCard = memo(({ game, rating, onRate, onPlay, onDownload, o
           <AlertDialogAction onClick={confirmDelete} disabled={isUninstalling}>
             {isUninstalling ? t("library.uninstalling") : t("library.delete", { game: game.game || game.name })}
           </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Save Game Data Dialog */}
+    <AlertDialog open={isSaveDataDialogOpen} onOpenChange={setIsSaveDataDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-2xl font-bold text-foreground">{t("library.saveGameDataTitle")}</AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-foreground">
+            {t("library.saveGameDataDescription", { game: game.game || game.name })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex gap-2">
+          <Button variant="outline" className="text-primary" onClick={() => performDelete(false)} disabled={isUninstalling}>
+            {t("library.saveGameDataNo")}
+          </Button>
+          <Button className="text-secondary" onClick={() => performDelete(true)} disabled={isUninstalling}>
+            {isUninstalling ? (
+              <>
+                <Loader className="mr-2 h-4 w-4 animate-spin" />
+                {t("library.deleting")}
+              </>
+            ) : (
+              t("library.saveGameDataYes")
+            )}
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -2833,6 +2927,7 @@ const InstalledGameCard = memo(
     const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
     const [logoData, setLogoData] = useState(null);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [isSaveDataDialogOpen, setIsSaveDataDialogOpen] = useState(false);
     const [isUninstalling, setIsUninstalling] = useState(false);
     const [isReportOpen, setIsReportOpen] = useState(false);
     const isFavorite = favorites.includes(game.game || game.name);
@@ -3047,10 +3142,23 @@ const InstalledGameCard = memo(
       setIsDeleteDialogOpen(true);
     };
 
-    const confirmDeleteGame = async () => {
+    const confirmDeleteGame = () => {
+      setIsDeleteDialogOpen(false);
+      if (!game.isCustom) {
+        setIsSaveDataDialogOpen(true);
+      } else {
+        performDelete(false);
+      }
+    };
+
+    const performDelete = async (saveData) => {
       try {
         setIsUninstalling(true);
         const gameId = game.game || game.name;
+
+        if (saveData) {
+          await window.electron.saveDeletedGameData(gameId);
+        }
 
         if (game.isCustom) {
           await window.electron.removeCustomGame(gameId);
@@ -3059,7 +3167,7 @@ const InstalledGameCard = memo(
         }
 
         setIsUninstalling(false);
-        setIsDeleteDialogOpen(false);
+        setIsSaveDataDialogOpen(false);
         window.location.reload();
       } catch (error) {
         console.error("Error deleting game:", error);
@@ -3310,6 +3418,35 @@ const InstalledGameCard = memo(
                   </>
                 ) : (
                   t("library.delete", { game: game.game || game.name })
+                )}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Save Game Data Dialog */}
+        <AlertDialog open={isSaveDataDialogOpen} onOpenChange={setIsSaveDataDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-2xl font-bold text-foreground">
+                {t("library.saveGameDataTitle")}
+              </AlertDialogTitle>
+              <AlertDialogDescription className="space-y-4 text-muted-foreground">
+                {t("library.saveGameDataDescription", { game: game.game || game.name })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex gap-2">
+              <Button variant="outline" className="text-primary" onClick={() => performDelete(false)} disabled={isUninstalling}>
+                {t("library.saveGameDataNo")}
+              </Button>
+              <Button className="text-secondary" onClick={() => performDelete(true)} disabled={isUninstalling}>
+                {isUninstalling ? (
+                  <>
+                    <Loader className="mr-2 h-4 w-4 animate-spin" />
+                    {t("library.deleting")}
+                  </>
+                ) : (
+                  t("library.saveGameDataYes")
                 )}
               </Button>
             </AlertDialogFooter>
@@ -3906,7 +4043,7 @@ const PlayLaterGameCard = memo(({ game, onDownload, onRemove }) => {
 
 PlayLaterGameCard.displayName = "PlayLaterGameCard";
 
-const AddGameForm = ({ onSuccess }) => {
+const AddGameForm = ({ onSuccess, onRestorePrompt }) => {
   const { t } = useLanguage();
   const { settings } = useSettings();
   const [showImportDialog, setShowImportDialog] = useState(false);
@@ -4116,7 +4253,7 @@ const AddGameForm = ({ onSuccess }) => {
         customCount: customGames?.length,
       });
 
-      const allExistingGames = [...(installedGames || []), ...(customGames || [])];
+      const allExistingGames = [...(installedGames || []), ...(customGames || []).filter(g => !g._isDeleted)];
 
       const normalizedFormName = normalizeGameName(formData.name);
       const gameExists = allExistingGames.some(
@@ -4211,6 +4348,19 @@ const AddGameForm = ({ onSuccess }) => {
           }
         }
         console.log(`[AddGameForm] Downloaded ${downloadedCount} assets`);
+      }
+
+      // Check if there is a saved deletion stub for this game name — prompt to restore
+      try {
+        const freshCustomGames = await window.electron.getCustomGames();
+        const stub = (freshCustomGames || []).find(
+          g => g._isDeleted && normalizeGameName(g.game) === normalizeGameName(formData.name)
+        );
+        if (stub && onRestorePrompt) {
+          onRestorePrompt({ gameName: formData.name, stub });
+        }
+      } catch (e) {
+        console.warn("[AddGameForm] Could not check for restore stub:", e);
       }
 
       toast.success(t("library.addGame.success"));

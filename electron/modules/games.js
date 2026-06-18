@@ -158,9 +158,30 @@ function registerGameHandlers() {
         }
       });
 
-      const allGames = (await Promise.all(allGamesPromises))
+      let allGames = (await Promise.all(allGamesPromises))
         .flat()
         .filter(game => game !== null);
+
+      // Flag reinstalled games that have a _isDeleted stub so the frontend can prompt to restore
+      const gamesFilePath = path.join(settings.downloadDirectory, "games.json");
+      if (fs.existsSync(gamesFilePath)) {
+        try {
+          const gamesData = JSON.parse(fs.readFileSync(gamesFilePath, "utf8"));
+          const deletedStubs = (gamesData.games || []).filter(g => g._isDeleted);
+          if (deletedStubs.length > 0) {
+            allGames = allGames.map(installedGame => {
+              const gameName = installedGame.game || installedGame.name || "";
+              const stub = deletedStubs.find(s => s.game === gameName);
+              if (!stub) return installedGame;
+              // Attach stub data so the frontend can show a restore prompt
+              return { ...installedGame, _deletedStub: stub };
+            });
+          }
+        } catch (e) {
+          console.warn("[get-games] Could not check deleted stubs:", e.message);
+        }
+      }
+
       return allGames;
     } catch (error) {
       console.error("Error reading the settings file:", error);
@@ -637,6 +658,162 @@ function registerGameHandlers() {
   // Check if game is running
   ipcMain.handle("is-game-running", async (_, game) => {
     return runGameProcesses.has(game);
+  });
+
+  // Save deleted game data as a stub in games.json before deletion
+  ipcMain.handle("save-deleted-game-data", async (_, gameName) => {
+    const settings = settingsManager.getSettings();
+    try {
+      if (!settings.downloadDirectory) return { success: false };
+
+      const sanitizedGame = sanitizeGameName(gameName);
+      const allDirectories = [
+        settings.downloadDirectory,
+        ...(settings.additionalDirectories || []),
+      ];
+
+      // Find the game's .ascendara.json to extract stats
+      let gameInfo = null;
+      for (const dir of allDirectories) {
+        const testPath = path.join(dir, sanitizedGame, `${sanitizedGame}.ascendara.json`);
+        if (fs.existsSync(testPath)) {
+          try { gameInfo = JSON.parse(fs.readFileSync(testPath, "utf8")); } catch (e) {}
+          break;
+        }
+        // Also try with original name (unsanitized folder)
+        const testPathOrig = path.join(dir, gameName, `${gameName}.ascendara.json`);
+        if (fs.existsSync(testPathOrig)) {
+          try { gameInfo = JSON.parse(fs.readFileSync(testPathOrig, "utf8")); } catch (e) {}
+          break;
+        }
+      }
+
+      const gamesFilePath = path.join(settings.downloadDirectory, "games.json");
+
+      // Ensure games.json exists
+      let gamesData = { games: [] };
+      if (fs.existsSync(gamesFilePath)) {
+        try { gamesData = JSON.parse(fs.readFileSync(gamesFilePath, "utf8")); } catch (e) {}
+      }
+      if (!Array.isArray(gamesData.games)) gamesData.games = [];
+
+      // Remove any existing entry for this game (reinstall clean-slate)
+      gamesData.games = gamesData.games.filter(g => g.game !== gameName);
+
+      // Build the stub with preserved stats
+      const stub = {
+        game: gameName,
+        _isDeleted: true,
+        playTime: gameInfo?.playTime || 0,
+        launchCount: gameInfo?.launchCount || 0,
+        lastPlayed: gameInfo?.lastPlayed || null,
+        favorite: gameInfo?.favorite || false,
+        gameID: gameInfo?.gameID || null,
+        imgID: gameInfo?.imgID || null,
+        online: gameInfo?.online || false,
+        dlc: gameInfo?.dlc || false,
+        version: gameInfo?.version || null,
+        isVr: gameInfo?.isVr || false,
+        deletedAt: new Date().toISOString(),
+      };
+
+      gamesData.games.push(stub);
+      fs.writeFileSync(gamesFilePath, JSON.stringify(gamesData, null, 2));
+      console.log(`[save-deleted-game-data] Saved deletion stub for: ${gameName}`);
+      return { success: true };
+    } catch (error) {
+      console.error("Error saving deleted game data:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Restore deleted game data: write stats from stub back into the game's .ascendara.json and remove the stub
+  ipcMain.handle("restore-deleted-game-data", async (_, gameName) => {
+    const settings = settingsManager.getSettings();
+    try {
+      if (!settings.downloadDirectory) return { success: false };
+
+      const gamesFilePath = path.join(settings.downloadDirectory, "games.json");
+      if (!fs.existsSync(gamesFilePath)) return { success: false, error: "No games.json" };
+
+      const gamesData = JSON.parse(fs.readFileSync(gamesFilePath, "utf8"));
+      const stub = (gamesData.games || []).find(g => g._isDeleted && g.game === gameName);
+      if (!stub) return { success: false, error: "No stub found" };
+
+      // Find the game's .ascendara.json and merge stats in
+      const sanitizedGame = sanitizeGameName(gameName);
+      const allDirectories = [
+        settings.downloadDirectory,
+        ...(settings.additionalDirectories || []),
+      ];
+
+      let restored = false;
+      for (const dir of allDirectories) {
+        for (const nameVariant of [sanitizedGame, gameName]) {
+          const gameInfoPath = path.join(dir, nameVariant, `${nameVariant}.ascendara.json`);
+          if (fs.existsSync(gameInfoPath)) {
+            try {
+              const gameData = JSON.parse(fs.readFileSync(gameInfoPath, "utf8"));
+              gameData.playTime = Math.max(gameData.playTime || 0, stub.playTime || 0);
+              gameData.launchCount = Math.max(gameData.launchCount || 0, stub.launchCount || 0);
+              if (stub.lastPlayed) gameData.lastPlayed = stub.lastPlayed;
+              if (stub.favorite) gameData.favorite = true;
+              fs.writeFileSync(gameInfoPath, JSON.stringify(gameData, null, 2));
+              restored = true;
+            } catch (e) {
+              console.warn(`[restore-deleted-game-data] Could not write game info:`, e.message);
+            }
+            break;
+          }
+        }
+        if (restored) break;
+      }
+
+      // If no .ascendara.json found, try merging into a matching custom game entry in games.json
+      if (!restored) {
+        const customIdx = gamesData.games.findIndex(g => !g._isDeleted && g.game === gameName);
+        if (customIdx !== -1) {
+          const entry = gamesData.games[customIdx];
+          gamesData.games[customIdx] = {
+            ...entry,
+            playTime: Math.max(entry.playTime || 0, stub.playTime || 0),
+            launchCount: Math.max(entry.launchCount || 0, stub.launchCount || 0),
+            lastPlayed: stub.lastPlayed || entry.lastPlayed || null,
+            favorite: entry.favorite || stub.favorite || false,
+          };
+          restored = true;
+        }
+      }
+
+      // Remove the stub regardless of whether the game info was found
+      gamesData.games = gamesData.games.filter(g => !(g._isDeleted && g.game === gameName));
+      fs.writeFileSync(gamesFilePath, JSON.stringify(gamesData, null, 2));
+      console.log(`[restore-deleted-game-data] Restored data for: ${gameName}`);
+      return { success: true, restored };
+    } catch (error) {
+      console.error("Error restoring deleted game data:", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Discard deleted game stub without restoring (user chose not to restore)
+  ipcMain.handle("discard-deleted-game-data", async (_, gameName) => {
+    const settings = settingsManager.getSettings();
+    try {
+      if (!settings.downloadDirectory) return { success: false };
+
+      const gamesFilePath = path.join(settings.downloadDirectory, "games.json");
+      if (!fs.existsSync(gamesFilePath)) return { success: true };
+
+      const gamesData = JSON.parse(fs.readFileSync(gamesFilePath, "utf8"));
+      gamesData.games = (gamesData.games || []).filter(g => !(g._isDeleted && g.game === gameName));
+      fs.writeFileSync(gamesFilePath, JSON.stringify(gamesData, null, 2));
+      console.log(`[discard-deleted-game-data] Discarded stub for: ${gameName}`);
+      return { success: true };
+    } catch (error) {
+      console.error("Error discarding deleted game data:", error);
+      return { success: false, error: error.message };
+    }
   });
 
   // Delete game

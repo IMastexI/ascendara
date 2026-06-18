@@ -1220,6 +1220,9 @@ export default function GameScreen() {
   const [isUninstalling, setIsUninstalling] = useState(false);
   const [isVerifyingOpen, setIsVerifyingOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isSaveDataDialogOpen, setIsSaveDataDialogOpen] = useState(false);
+  const [isRestorePromptOpen, setIsRestorePromptOpen] = useState(false);
+  const [pendingRestoreStub, setPendingRestoreStub] = useState(null);
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [showVrWarning, setShowVrWarning] = useState(false);
   const [showOnlineFixWarning, setShowOnlineFixWarning] = useState(false);
@@ -1502,6 +1505,24 @@ export default function GameScreen() {
         if (gameName) {
           window.electron.ipcRenderer.invoke("ensure-game-assets", gameName);
         }
+
+        // Check games.json for a _isDeleted stub matching this game and prompt to restore
+        try {
+          const customGames = await window.electron.getCustomGames();
+          const deletedStubs = (customGames || []).filter(g => g._isDeleted);
+          console.log("[GameScreen] Checking for deleted stub for:", gameName, "| All stubs:", deletedStubs.map(g => g.game));
+          const stub = deletedStubs.find(g => g.game === gameName);
+          if (stub) {
+            console.log("[GameScreen] Found deleted stub, showing restore prompt:", stub);
+            setPendingRestoreStub(stub);
+            setIsRestorePromptOpen(true);
+          } else {
+            console.log("[GameScreen] No deleted stub found for:", gameName);
+          }
+        } catch (e) {
+          console.warn("[GameScreen] Could not check for deleted stub:", e);
+        }
+
         setLoading(true);
 
         // Check if executable exists
@@ -2244,11 +2265,25 @@ export default function GameScreen() {
     await window.electron.openGameDirectory(game.game || game.name, game.isCustom);
   };
 
-  // Handle delete game
-  const handleDeleteGame = async () => {
+  // Handle delete game — step 1: confirm delete, then ask about saving data
+  const handleDeleteGame = () => {
+    setIsDeleteDialogOpen(false);
+    if (!game.isCustom) {
+      setIsSaveDataDialogOpen(true);
+    } else {
+      performDeleteGame(false);
+    }
+  };
+
+  // Step 2: perform the actual deletion (optionally saving data first)
+  const performDeleteGame = async (saveData) => {
     try {
       setIsUninstalling(true);
       const gameId = game.game || game.name;
+
+      if (saveData) {
+        await window.electron.saveDeletedGameData(gameId);
+      }
 
       // Remove the game from all folders
       const folders = loadFolders();
@@ -2285,7 +2320,7 @@ export default function GameScreen() {
       }
 
       setIsUninstalling(false);
-      setIsDeleteDialogOpen(false);
+      setIsSaveDataDialogOpen(false);
       navigate("/library");
     } catch (error) {
       console.error("Error deleting game:", error);
@@ -4703,6 +4738,89 @@ export default function GameScreen() {
         isUninstalling={isUninstalling}
         t={t}
       />
+
+      {/* Restore Game Data Dialog */}
+      <AlertDialog open={isRestorePromptOpen} onOpenChange={() => {}}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-2xl font-bold text-foreground">
+              {t("library.restoreGameDataTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 pt-1">
+                <p className="text-sm text-muted-foreground">
+                  {t("library.restoreGameDataDescription", { game: game.game || game.name })}
+                </p>
+                {pendingRestoreStub?.playTime > 60 && (() => {
+                  const secs = pendingRestoreStub.playTime;
+                  const h = Math.floor(secs / 3600);
+                  const m = Math.floor((secs % 3600) / 60);
+                  const label = h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+                  return (
+                    <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+                      <span className="text-foreground/80">
+                        <span className="font-medium text-foreground">{label}</span> of playtime saved
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              className="text-primary"
+              onClick={async () => {
+                try { await window.electron.discardDeletedGameData(game.game || game.name); } catch (e) {}
+                setIsRestorePromptOpen(false);
+                setPendingRestoreStub(null);
+              }}
+            >
+              {t("library.restoreGameDataNo")}
+            </Button>
+            <Button
+              className="text-secondary"
+              onClick={async () => {
+                try { await window.electron.restoreDeletedGameData(game.game || game.name); } catch (e) {}
+                setIsRestorePromptOpen(false);
+                setPendingRestoreStub(null);
+              }}
+            >
+              {t("library.restoreGameDataYes")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Save Game Data Dialog */}
+      <AlertDialog open={isSaveDataDialogOpen} onOpenChange={setIsSaveDataDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-2xl font-bold text-foreground">
+              {t("library.saveGameDataTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-4 text-muted-foreground">
+              {t("library.saveGameDataDescription", { game: game.game })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex gap-2">
+            <Button variant="outline" className="text-primary" onClick={() => performDeleteGame(false)} disabled={isUninstalling}>
+              {t("library.saveGameDataNo")}
+            </Button>
+            <Button className="text-secondary" onClick={() => performDeleteGame(true)} disabled={isUninstalling}>
+              {isUninstalling ? (
+                <>
+                  <Loader className="mr-2 h-4 w-4 animate-spin" />
+                  {t("library.deleting")}
+                </>
+              ) : (
+                t("library.saveGameDataYes")
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Steam Not Running Dialog */}
       <SteamNotRunningDialog
